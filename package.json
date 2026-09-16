@@ -1,0 +1,16 @@
+{
+    "name": "prepreset",
+    "version": "1.0.0",
+    "description": "Named sub-presets for SillyTavern chat completion prompt toggles",
+    "type": "module",
+    "private": true,
+    "license": "MIT",
+    "homepage": "https://github.com/HalfToast/prepreset",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/HalfToast/prepreset.git"
+    },
+    "scripts": {
+        "test": "node --test tests/**/*.test.js"
+    }
+}

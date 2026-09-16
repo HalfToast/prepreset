@@ -1,0 +1,16 @@
+{
+    "display_name": "Prepreset",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "HalfToast",
+    "version": "1.0.0",
+    "homePage": "https://github.com/HalfToast/prepreset",
+    "minimum_client_version": "1.18.0",
+    "auto_update": true,
+    "hooks": {
+        "activate": "init"
+    }
+}
