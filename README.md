@@ -15,10 +15,13 @@ edit to the shared parts has to be repeated across every copy.
 
 Prepreset adds a sub-preset dropdown right above the Prompt Manager. A sub-preset
 stores the enabled/disabled state of each prompt and nothing else. Pick one and
-its toggles are applied; flip a toggle and it's saved back automatically.
+its toggles are applied; flip whatever you like, then press Save to store them
+back.
 
 * Sub-presets belong to the master preset they were created under.
 * Switching is manual. Nothing is applied on character or chat switch.
+* Saving is explicit. Flipping toggles never touches a stored sub-preset until
+  you press Save.
 * Prepreset never writes to your preset files. Sub-presets live in
   `settings.json` under `extension_settings.prepreset`.
 * Save the master while a sub-preset is active and you get asked which toggles
@@ -55,6 +58,7 @@ Open AI Response Configuration and look at the row above the Prompt Manager.
 
 | Button | Action |
 | --- | --- |
+| Save | Stores the toggles currently in effect into the selected sub-preset |
 | New | Creates a sub-preset from the toggles currently in effect |
 | Rename | Renames the selected sub-preset |
 | Duplicate | Copies the selected sub-preset |
@@ -62,6 +66,10 @@ Open AI Response Configuration and look at the row above the Prompt Manager.
 
 Selecting "- Master (no sub-preset) -" restores the toggles as saved in the
 master preset file.
+
+When the live toggles differ from what the selected sub-preset has stored, Save
+lights up and a `•` appears beside the name in the dropdown. Switching away (to
+another sub-preset, to Master, or via New or Duplicate) asks first.
 
 ## Known limitations
 
@@ -85,12 +93,10 @@ whatever is currently in effect, same as any other save from live settings.
 Select "- Master (no sub-preset) -" first if you want the new preset to start
 from the master's toggles.
 
-**"Reset prompt order" permanently shrinks the active sub-preset.** The reset
-replaces the live prompt order with the shorter built-in default and saves, and
-auto-save snapshots that like any other change, so the sub-preset loses its
-entries for the prompts the reset removed. Consistent with "every mutation
-auto-saves", but it's the one action that destroys intent rather than recording
-it.
+**Switching the master preset discards unsaved toggles without asking.**
+SillyTavern has already swapped the prompt order by the time Prepreset hears
+about it, so there's nothing left to offer to save. Press Save before changing
+master presets.
 
 ## How it works
 
@@ -99,6 +105,11 @@ Sub-presets live in SillyTavern's `settings.json` under
 writes its stored states into the live prompt order and re-renders the Prompt
 Manager. Selecting Master reads the master's own states back out of the preset
 file, so it stays truthful even after you edit and re-save the master.
+
+"Unsaved" is worked out by comparing the live toggles against what the
+sub-preset has stored, not tracked as a flag. That's why it survives a page
+reload: SillyTavern persists the live prompt order, and nothing touches the
+sub-preset until you press Save.
 
 Your preset files are only ever written by SillyTavern's own save actions.
 

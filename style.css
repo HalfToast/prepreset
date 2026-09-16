@@ -1,12 +1,15 @@
 #prepreset_row {
     display: flex;
+    /* Five buttons plus the dropdown don't fit on a phone. Wrapping drops them
+       onto their own line instead of squeezing the name out of sight. */
+    flex-wrap: wrap;
     align-items: center;
     gap: 5px;
     margin-bottom: 5px;
 }
 
 #prepreset_select {
-    flex: 1;
+    flex: 1 1 12em;
     min-width: 0;
 }
 

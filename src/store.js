@@ -1,8 +1,8 @@
 /**
  * Storage schema and sub-preset CRUD.
  *
- * Nothing here touches SillyTavern, the DOM, or globals (except
- * crypto.randomUUID), so the tests can run it under plain Node. Callers pass
+ * Nothing here touches SillyTavern, the DOM, or globals (except `crypto`, and
+ * only through newId), so the tests can run it under plain Node. Callers pass
  * the settings object in; this module never reaches for one itself.
  *
  * Accessors hand back live references into settings, so don't mutate what you
@@ -13,6 +13,21 @@
  */
 
 export const SCHEMA_VERSION = 1;
+
+// crypto.randomUUID only exists in a secure context, so it's undefined when
+// SillyTavern is reached over plain http from a phone on the LAN. SillyTavern's
+// own uuidv4() guards the same way (public/scripts/utils.js:1961); this is a
+// local copy to keep the module free of SillyTavern imports.
+export function newId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
 
 export function createDefaultSettings() {
     return { version: SCHEMA_VERSION, masters: {} };
@@ -98,7 +113,7 @@ export function setActiveSubPreset(settings, masterName, subId) {
 
 export function createSubPreset(settings, masterName, name, toggles) {
     const sub = {
-        id: crypto.randomUUID(),
+        id: newId(),
         name: String(name),
         toggles: { ...toggles },
     };

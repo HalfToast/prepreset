@@ -41,7 +41,7 @@ export async function init() {
 
     extension_settings[EXTENSION_KEY] = migrate(extension_settings[EXTENSION_KEY]);
 
-    installAutoSaveHook();
+    installChangeHook();
 
     injectControlRow({
         getSettings,
@@ -49,6 +49,8 @@ export async function init() {
         getActiveSub,
         selectSubPreset,
         readLiveToggles,
+        isDirty,
+        saveActiveSubPreset,
         persist,
     });
 
@@ -61,7 +63,7 @@ export async function init() {
     onSelectionChanged(renderControlRow);
 
     eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => {
-        installAutoSaveHook();
+        installChangeHook();
         // prompt_order has just been loaded from the new preset file, so the live
         // state already equals the new master's own toggles. Reset the selection
         // rather than silently re-applying a remembered sub-preset.
@@ -96,13 +98,6 @@ export async function init() {
     console.debug(`[${EXTENSION_NAME}] initialized`, getSettings());
 }
 
-// True while we are writing toggles ourselves.
-let applying = false;
-
-export function isApplying() {
-    return applying;
-}
-
 export function getMasterName() {
     return oai_settings.preset_settings_openai ?? '';
 }
@@ -113,8 +108,9 @@ export function getDummyId() {
     return promptManager?.configuration?.promptOrder?.dummyId ?? null;
 }
 
-// Null if the Prompt Manager isn't ready.
-export function readLiveToggles() {
+// Null if the Prompt Manager isn't ready. Pass quiet for callers that run on
+// every toggle flip, like isDirty(), where a toast per flip would be a stream.
+export function readLiveToggles({ quiet = false } = {}) {
     const dummyId = getDummyId();
     if (dummyId === null) {
         console.warn(`[${EXTENSION_NAME}] Prompt Manager not ready`);
@@ -124,7 +120,9 @@ export function readLiveToggles() {
     if (!entry) {
         const message = `No prompt order for dummy id ${dummyId}`;
         console.warn(`[${EXTENSION_NAME}] ${message}`);
-        toastr.warning(message, EXTENSION_NAME);
+        if (!quiet) {
+            toastr.warning(message, EXTENSION_NAME);
+        }
         return null;
     }
     return readToggles(entry.order);
@@ -153,14 +151,10 @@ export function readMasterToggles() {
 }
 
 // Writes a toggle map into the live prompt order and re-renders the Prompt
-// Manager.
-//
-// Don't count on `applying` to keep this write out of auto-save. render(false)
-// does its work inside a waitUntilCondition().then() (PromptManager.js:865+),
-// by which point the flag is false again. What actually saves us is the
-// togglesEqual short-circuit in autoSaveActiveSubPreset().
+// Manager. Nothing is stored against a sub-preset here; that only happens when
+// the user saves.
 export function applyTogglesToLive(toggles) {
-    installAutoSaveHook();
+    installChangeHook();
 
     const dummyId = getDummyId();
     if (dummyId === null) {
@@ -173,15 +167,10 @@ export function applyTogglesToLive(toggles) {
         return false;
     }
 
-    applying = true;
-    try {
-        entry.order = applyToggles(entry.order, toggles);
-        promptManager?.render(false);
-        persist();
-        return true;
-    } finally {
-        applying = false;
-    }
+    entry.order = applyToggles(entry.order, toggles);
+    promptManager?.render(false);
+    persist();
+    return true;
 }
 
 const selectionListeners = [];
@@ -216,43 +205,51 @@ export function selectSubPreset(subId) {
     notifySelectionChanged();
 }
 
-function autoSaveActiveSubPreset() {
-    if (applying) {
-        return;
-    }
+// Derived rather than tracked as a flag, so it survives a page reload:
+// SillyTavern persists the live prompt order, and nothing touches the
+// sub-preset until the user saves.
+export function isDirty() {
     const sub = getActiveSub();
     if (!sub) {
-        return;
+        return false;
+    }
+    const live = readLiveToggles({ quiet: true });
+    return !!live && !togglesEqual(live, sub.toggles);
+}
+
+export function saveActiveSubPreset() {
+    const sub = getActiveSub();
+    if (!sub) {
+        return false;
     }
     const live = readLiveToggles();
-    if (!live || togglesEqual(live, sub.toggles)) {
-        return;
+    if (!live) {
+        return false;
     }
     updateSubPresetToggles(getSettings(), getMasterName(), sub.id, live);
     persist();
+    notifySelectionChanged();
+    return true;
 }
 
-// Wraps promptManager.saveServiceSettings so every mutation also snapshots into
-// the active sub-preset. Every mutation path in PromptManager goes through it,
-// which makes it the one choke point.
+// Wraps promptManager.saveServiceSettings, which every mutation path in
+// PromptManager goes through, so it is the one place that sees a toggle change.
 //
-// Text edits and reordering route through here too. Harmless: only the enabled
-// flags are read, and togglesEqual drops an unchanged snapshot.
-let saveHookInstalled = false;
+// It writes nothing: saving is explicit. All it does is re-render the control
+// row so the unsaved-changes marker keeps up. Text edits and reordering route
+// through here too, which is harmless, since the marker only compares the
+// enabled flags.
+let changeHookInstalled = false;
 
-function installAutoSaveHook() {
-    if (saveHookInstalled || !promptManager) {
+function installChangeHook() {
+    if (changeHookInstalled || !promptManager) {
         return;
     }
     const original = promptManager.saveServiceSettings.bind(promptManager);
     promptManager.saveServiceSettings = function () {
-        // Snapshot before returning the original's promise. That promise resolves
-        // on SETTINGS_UPDATED up to a second later, by which point the user may
-        // have picked a different sub-preset, and the edit would land on the wrong
-        // one or be dropped.
-        autoSaveActiveSubPreset();
+        notifySelectionChanged();
         return original();
     };
-    saveHookInstalled = true;
-    console.debug(`[${EXTENSION_NAME}] auto-save hook installed`);
+    changeHookInstalled = true;
+    console.debug(`[${EXTENSION_NAME}] change hook installed`);
 }

@@ -4,6 +4,7 @@ import {
     SCHEMA_VERSION, createDefaultSettings, migrate, getMaster, listSubPresets,
     findSubPreset, getActiveSubPreset, setActiveSubPreset, createSubPreset,
     renameSubPreset, duplicateSubPreset, deleteSubPreset, updateSubPresetToggles,
+    newId,
 } from '../src/store.js';
 
 test('createDefaultSettings returns an empty v1 object', () => {
@@ -197,4 +198,60 @@ test('updateSubPresetToggles replaces the map with a copy', () => {
     next.main = true;
     assert.equal(sub.toggles.main, false);
     assert.equal(updateSubPresetToggles(settings, 'M', 'missing', {}), null);
+});
+
+// globalThis.crypto is an accessor in Node, so defineProperty is the only way
+// to stub it.
+function withoutRandomUUID(run) {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', { value: {}, configurable: true });
+    try {
+        run();
+    } finally {
+        Object.defineProperty(globalThis, 'crypto', original);
+    }
+}
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test('newId works when crypto.randomUUID is unavailable', () => {
+    withoutRandomUUID(() => {
+        assert.equal(typeof crypto.randomUUID, 'undefined');
+        assert.match(newId(), UUID_V4);
+        assert.notEqual(newId(), newId());
+    });
+});
+
+// Shape alone proves nothing here: real randomUUID output matches UUID_V4 too.
+test('newId falls back to Math.random, not a still-present randomUUID', () => {
+    const realRandom = Math.random;
+    withoutRandomUUID(() => {
+        try {
+            Math.random = () => 0;
+            assert.equal(newId(), '00000000-0000-4000-8000-000000000000');
+            Math.random = () => 0.9999999999;
+            assert.equal(newId(), 'ffffffff-ffff-4fff-bfff-ffffffffffff');
+        } finally {
+            Math.random = realRandom;
+        }
+    });
+});
+
+test('newId uses crypto.randomUUID when it is available', () => {
+    assert.equal(typeof crypto.randomUUID, 'function');
+    assert.match(newId(), UUID_V4);
+    assert.notEqual(newId(), newId());
+});
+
+test('createSubPreset still assigns distinct ids without crypto.randomUUID', () => {
+    withoutRandomUUID(() => {
+        const settings = createDefaultSettings();
+        const a = createSubPreset(settings, 'M', 'A', { main: true });
+        const b = createSubPreset(settings, 'M', 'B', { main: false });
+        assert.match(a.id, UUID_V4);
+        assert.notEqual(a.id, b.id);
+        assert.equal(listSubPresets(settings, 'M').length, 2);
+        assert.deepEqual(a.toggles, { main: true });
+        assert.deepEqual(b.toggles, { main: false });
+    });
 });

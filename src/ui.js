@@ -15,7 +15,8 @@ const ROW_ID = 'prepreset_row';
 const SELECT_ID = 'prepreset_select';
 const MASTER_VALUE = '';
 
-// { getSettings, getMasterName, getActiveSub, selectSubPreset, readLiveToggles, persist }
+// { getSettings, getMasterName, getActiveSub, selectSubPreset, readLiveToggles,
+//   isDirty, saveActiveSubPreset, persist }
 let api = null;
 
 // Safe to call repeatedly.
@@ -38,6 +39,9 @@ export function injectControlRow(uiApi) {
     row.classList.add('flex-container');
     row.innerHTML = `
         <select id="${SELECT_ID}" class="text_pole" title="Sub-preset"></select>
+        <div id="prepreset_save" class="menu_button menu_button_icon" title="Save toggles into this sub-preset">
+            <i class="fa-fw fa-solid fa-save"></i>
+        </div>
         <div id="prepreset_new" class="menu_button menu_button_icon" title="New sub-preset from current toggles">
             <i class="fa-fw fa-solid fa-plus"></i>
         </div>
@@ -55,6 +59,7 @@ export function injectControlRow(uiApi) {
     anchor.insertAdjacentElement('beforebegin', row);
 
     document.getElementById(SELECT_ID).addEventListener('change', onSelectChanged);
+    document.getElementById('prepreset_save').addEventListener('click', onSaveClicked);
     document.getElementById('prepreset_new').addEventListener('click', onNewClicked);
     document.getElementById('prepreset_rename').addEventListener('click', onRenameClicked);
     document.getElementById('prepreset_duplicate').addEventListener('click', onDuplicateClicked);
@@ -72,6 +77,7 @@ export function renderControlRow() {
 
     const subPresets = listSubPresets(api.getSettings(), api.getMasterName());
     const active = api.getActiveSub();
+    const dirty = api.isDirty();
 
     select.innerHTML = '';
 
@@ -83,24 +89,59 @@ export function renderControlRow() {
     for (const sub of subPresets) {
         const option = document.createElement('option');
         option.value = sub.id;
-        option.textContent = sub.name;
+        // Bullet marks unsaved changes, so it shows without having to watch
+        // the Save button.
+        option.textContent = (active && sub.id === active.id && dirty) ? `${sub.name} \u2022` : sub.name;
         select.append(option);
     }
 
     select.value = active ? active.id : MASTER_VALUE;
 
-    const disabled = !active;
     for (const id of ['prepreset_rename', 'prepreset_duplicate', 'prepreset_delete']) {
-        document.getElementById(id)?.classList.toggle('disabled', disabled);
+        document.getElementById(id)?.classList.toggle('disabled', !active);
+    }
+    document.getElementById('prepreset_save')?.classList.toggle('disabled', !active || !dirty);
+}
+
+// Every path that changes the selection goes through here first. Deleting is
+// exempt: it already confirms, and warning about unsaved edits to something
+// being thrown away is noise.
+async function confirmDiscardIfDirty() {
+    if (!api.isDirty()) {
+        return true;
+    }
+    const active = api.getActiveSub();
+    const safeName = escapeHtml(active ? active.name : '');
+    return !!await Popup.show.confirm(
+        'Unsaved changes',
+        `"${safeName}" has unsaved toggle changes. Discard them?`,
+    );
+}
+
+function onSaveClicked() {
+    const active = api.getActiveSub();
+    if (!active || !api.isDirty()) {
+        return;
+    }
+    if (api.saveActiveSubPreset()) {
+        toastr.success(`Saved "${active.name}"`, 'Prepreset');
     }
 }
 
-function onSelectChanged(event) {
+async function onSelectChanged(event) {
     const value = event.target.value;
+    if (!await confirmDiscardIfDirty()) {
+        // Put the dropdown back where it was; the selection never moved.
+        renderControlRow();
+        return;
+    }
     api.selectSubPreset(value === MASTER_VALUE ? null : value);
 }
 
 async function onNewClicked() {
+    if (!await confirmDiscardIfDirty()) {
+        return;
+    }
     const toggles = api.readLiveToggles();
     if (!toggles) {
         toastr.warning('Prompt Manager is not ready yet', 'Prepreset');
@@ -136,9 +177,14 @@ async function onRenameClicked() {
     renderControlRow();
 }
 
-function onDuplicateClicked() {
+async function onDuplicateClicked() {
     const active = api.getActiveSub();
     if (!active) {
+        return;
+    }
+    // Duplicate copies what is stored, not what is live, so unsaved toggles
+    // would be lost from both the original and the copy.
+    if (!await confirmDiscardIfDirty()) {
         return;
     }
     const copy = duplicateSubPreset(api.getSettings(), api.getMasterName(), active.id);
