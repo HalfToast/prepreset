@@ -1,7 +1,7 @@
 /**
- * The control row: a sub-preset dropdown plus new/rename/duplicate/delete
- * buttons, injected above the Prompt Manager. Owns no state of its own;
- * everything arrives through the `api` object passed to injectControlRow.
+ * The control row: a sub-preset dropdown plus save/new/rename/duplicate/delete
+ * buttons, under the master preset dropdown. Owns no state; everything arrives
+ * through the `api` object passed to injectControlRow.
  */
 
 import { Popup } from '/scripts/popup.js';
@@ -15,7 +15,7 @@ const ROW_ID = 'prepreset_row';
 const SELECT_ID = 'prepreset_select';
 const MASTER_VALUE = '';
 
-// { getSettings, getMasterName, getActiveSub, selectSubPreset, readLiveToggles,
+// { getSettings, getMasterName, getActiveSub, selectSubPreset, diffLiveAgainstMaster,
 //   isDirty, saveActiveSubPreset, persist }
 let api = null;
 
@@ -28,9 +28,11 @@ export function injectControlRow(uiApi) {
         return;
     }
 
-    const anchor = document.getElementById('completion_prompt_manager');
+    // The master preset dropdown's row (public/index.html:198). Being inside the
+    // Chat Completion block means we hide with it when another API is selected.
+    const anchor = document.getElementById('settings_preset_openai')?.parentElement;
     if (!anchor) {
-        console.warn('[Prepreset] #completion_prompt_manager not found; control row not injected');
+        console.warn('[Prepreset] #settings_preset_openai not found; control row not injected');
         return;
     }
 
@@ -39,10 +41,10 @@ export function injectControlRow(uiApi) {
     row.classList.add('flex-container');
     row.innerHTML = `
         <select id="${SELECT_ID}" class="text_pole" title="Sub-preset"></select>
-        <div id="prepreset_save" class="menu_button menu_button_icon" title="Save toggles into this sub-preset">
+        <div id="prepreset_save" class="menu_button menu_button_icon" title="Save values into this sub-preset">
             <i class="fa-fw fa-solid fa-save"></i>
         </div>
-        <div id="prepreset_new" class="menu_button menu_button_icon" title="New sub-preset from current toggles">
+        <div id="prepreset_new" class="menu_button menu_button_icon" title="New sub-preset from current values">
             <i class="fa-fw fa-solid fa-plus"></i>
         </div>
         <div id="prepreset_rename" class="menu_button menu_button_icon" title="Rename sub-preset">
@@ -56,7 +58,7 @@ export function injectControlRow(uiApi) {
         </div>
     `;
 
-    anchor.insertAdjacentElement('beforebegin', row);
+    anchor.insertAdjacentElement('afterend', row);
 
     document.getElementById(SELECT_ID).addEventListener('change', onSelectChanged);
     document.getElementById('prepreset_save').addEventListener('click', onSaveClicked);
@@ -114,7 +116,7 @@ async function confirmDiscardIfDirty() {
     const safeName = escapeHtml(active ? active.name : '');
     return !!await Popup.show.confirm(
         'Unsaved changes',
-        `"${safeName}" has unsaved toggle changes. Discard them?`,
+        `"${safeName}" has unsaved changes. Discard them?`,
     );
 }
 
@@ -142,9 +144,10 @@ async function onNewClicked() {
     if (!await confirmDiscardIfDirty()) {
         return;
     }
-    const toggles = api.readLiveToggles();
-    if (!toggles) {
-        toastr.warning('Prompt Manager is not ready yet', 'Prepreset');
+    // Only store what differs, so it keeps following the master for the rest.
+    const overrides = api.diffLiveAgainstMaster();
+    if (!overrides) {
+        toastr.warning('Could not read the current or master values', 'Prepreset');
         return;
     }
     const name = await Popup.show.input('New sub-preset', 'Name:', '');
@@ -155,7 +158,7 @@ async function onNewClicked() {
     if (!name) {
         return;
     }
-    const sub = createSubPreset(api.getSettings(), api.getMasterName(), name, toggles);
+    const sub = createSubPreset(api.getSettings(), api.getMasterName(), name, overrides);
     api.selectSubPreset(sub.id);
 }
 

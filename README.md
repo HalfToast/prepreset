@@ -1,31 +1,35 @@
 # Prepreset
 
-A SillyTavern extension for keeping several prompt-toggle combinations under one
-chat completion preset, instead of duplicating the whole preset every time.
+A SillyTavern extension for keeping several variations of one chat completion
+preset (prompt toggles, samplers, context size and so on) without duplicating
+the whole preset each time.
 
-Needs SillyTavern 1.18.0 or newer and a Chat Completion API, since the Prompt
-Manager it extends only exists there.
+Needs SillyTavern 1.18.0 or newer and a Chat Completion API, since the presets
+it extends only exist there.
 
 ## What it does
 
-A chat completion preset carries dozens of prompts, each with an on/off toggle,
-and different character cards want different combinations. Normally the only way
-to keep those combinations is a full copy of the preset for each one, so every
-edit to the shared parts has to be repeated across every copy.
+Different character cards want different prompt toggles and settings. Normally
+that means a full copy of the preset for each one, and every edit to the shared
+parts has to be repeated across all of them.
 
-Prepreset adds a sub-preset dropdown right above the Prompt Manager. A sub-preset
-stores the enabled/disabled state of each prompt and nothing else. Pick one and
-its toggles are applied; flip whatever you like, then press Save to store them
-back.
+Prepreset adds a sub-preset dropdown under the master preset dropdown. A
+sub-preset only stores what you changed from the master, like a few toggles or a
+different temperature. Everything else follows the master, so edits to the
+master still reach your sub-presets. Pick one, change what you want, and press
+Save.
 
 * Sub-presets belong to the master preset they were created under.
 * Switching is manual. Nothing is applied on character or chat switch.
-* Saving is explicit. Flipping toggles never touches a stored sub-preset until
+* Saving is explicit. Changing values never touches a stored sub-preset until
   you press Save.
 * Prepreset never writes to your preset files. Sub-presets live in
   `settings.json` under `extension_settings.prepreset`.
-* Save the master while a sub-preset is active and you get asked which toggles
-  to save, the master's or the sub-preset's.
+* Connection settings (source, model, URLs, proxy, credentials) are never part
+  of a sub-preset. Prompt text and order always come from the master too; only
+  on/off state is stored.
+* Saving the master while a sub-preset is active asks whether to save the
+  master's own values or what's on screen.
 
 ## Install
 
@@ -54,62 +58,80 @@ extension list is built server-side at startup.
 
 ## Usage
 
-Open AI Response Configuration and look at the row above the Prompt Manager.
+Open AI Response Configuration and look at the row under the master preset
+dropdown.
 
 | Button | Action |
 | --- | --- |
-| Save | Stores the toggles currently in effect into the selected sub-preset |
-| New | Creates a sub-preset from the toggles currently in effect |
+| Save | Saves your changes into the selected sub-preset |
+| New | Creates a sub-preset from your current changes |
 | Rename | Renames the selected sub-preset |
 | Duplicate | Copies the selected sub-preset |
 | Delete | Removes the selected sub-preset and falls back to the master |
 
-Selecting "- Master (no sub-preset) -" restores the toggles as saved in the
+Selecting "- Master (no sub-preset) -" restores the values as saved in the
 master preset file.
 
-When the live toggles differ from what the selected sub-preset has stored, Save
-lights up and a `•` appears beside the name in the dropdown. Switching away (to
-another sub-preset, to Master, or via New or Duplicate) asks first.
+With unsaved changes, Save lights up and a `•` shows next to the name.
+Switching away (to another sub-preset, to Master, or via New or Duplicate) asks
+first.
+
+## Settings
+
+The Prepreset drawer in the Extensions panel picks which fields sub-presets
+manage. By default it's only prompt toggles, so nothing else changes until you
+turn parameters on. Fields are grouped (Sampling, Context & length, Reasoning &
+tools, Prompt formatting, Media, Other) with All/None buttons for each group.
+
+Unchecked fields are left alone when you switch sub-presets. If you uncheck a
+field the active sub-preset changed, the master's value is put back so it can't
+leak into the master preset file. Stored values aren't deleted; check the field
+again and reselect the sub-preset to get them back (unless you press Save
+first).
 
 ## Known limitations
 
-**Renaming a master hides its sub-presets.** They're keyed by the master
-preset's name, so after a rename the dropdown comes up empty: Prepreset is still
-looking them up under the old name. Nothing is deleted, and renaming back brings
-them all back, but there's no way around the disappearance itself.
-
-The master preset file itself is fine either way, because Prepreset puts the
-master's own toggles back before SillyTavern writes the renamed file. The one
-exception is a master whose file has no prompt order at all. There's nothing to
-restore from, so Prepreset warns instead of guessing and the rename behaves as
-it would without the extension.
-
-**Prompts added to the master after a sub-preset was saved** stay at the
-master's state rather than switching off, since a sub-preset only knows about
-the prompts that existed when it was last updated.
-
-**"Save preset as" captures the active toggles, not the master's.** It snapshots
-whatever is currently in effect, same as any other save from live settings.
-Select "- Master (no sub-preset) -" first if you want the new preset to start
-from the master's toggles.
-
-**Switching the master preset discards unsaved toggles without asking.**
-SillyTavern has already swapped the prompt order by the time Prepreset hears
-about it, so there's nothing left to offer to save. Press Save before changing
-master presets.
+* **Renaming a master hides its sub-presets.** They're keyed by preset name.
+  Nothing is deleted, and renaming it back brings them back. The master file
+  itself is safe, since Prepreset restores the master's values before the
+  rename saves, unless toggles are managed and the master has no prompt order.
+* **Prompts added to the master later** follow the master's state, since
+  sub-presets only store toggles they changed.
+* **Sub-presets from before parameter support store every toggle**, so master
+  toggle changes don't reach them until you press Save on them once. A prompt
+  added to the master since then may show `•` the first time; reselecting or
+  saving clears it.
+* **Values an old master file doesn't have can't be overridden.** There's
+  nothing to compare against, so Prepreset leaves them alone like SillyTavern
+  does.
+* **A master with no prompt order can't use sub-presets while toggles are
+  managed.** Selecting one warns and does nothing. Uncheck Prompt toggles to use
+  parameter overrides with it.
+* **Changing models can make a sub-preset look unsaved.** SillyTavern clamps
+  some values (temperature, for example) to the model's range, which then
+  differs from what's stored.
+* **Continue postfix radios don't update when a sub-preset applies it.** The
+  setting does change; the radios catch up on reload. SillyTavern's own preset
+  switching has the same issue.
+* **"Save preset as" saves what's on screen**, sub-preset changes included.
+  Select Master first if you want the master's values.
+* **Switching master presets drops unsaved changes without asking.** SillyTavern
+  has already loaded the new preset by the time Prepreset finds out, so save
+  first.
 
 ## How it works
 
-Sub-presets live in SillyTavern's `settings.json` under
-`extension_settings.prepreset`, keyed by master preset name. Selecting one
-writes its stored states into the live prompt order and re-renders the Prompt
-Manager. Selecting Master reads the master's own states back out of the preset
-file, so it stays truthful even after you edit and re-save the master.
+Sub-presets live in `settings.json` under `extension_settings.prepreset`, keyed
+by master preset name. Selecting one reads the master's values from its preset
+file, applies the sub-preset's differences on top, and pushes the result through
+the same controls SillyTavern uses when loading a preset. Selecting Master does
+the same without the differences.
 
-"Unsaved" is worked out by comparing the live toggles against what the
-sub-preset has stored, not tracked as a flag. That's why it survives a page
-reload: SillyTavern persists the live prompt order, and nothing touches the
-sub-preset until you press Save.
+The field list comes from SillyTavern itself (minus connection settings), so new
+parameters in future versions show up under Other automatically.
+
+"Unsaved" isn't a stored flag. It's worked out by comparing live values to the
+master plus the sub-preset's differences, which is why it survives a reload.
 
 Your preset files are only ever written by SillyTavern's own save actions.
 
@@ -122,10 +144,10 @@ as written.
 npm test
 ```
 
-The tests cover `src/store.js`, `src/toggles.js` and `src/escape.js`, which hold
-all the logic and import nothing from SillyTavern. The DOM-facing parts
-(`index.js`, `src/ui.js`, `src/guard.js`) have no automated coverage, so test
-those by hand against a real SillyTavern after changing them.
+The tests cover the logic in `src/store.js`, `src/toggles.js`,
+`src/overlay.js`, `src/fields.js` and `src/escape.js`. The DOM parts
+(`index.js`, `src/ui.js`, `src/guard.js`, `src/settings-panel.js`) aren't
+tested, so check those by hand in SillyTavern after changing them.
 
 For development, symlink the repo into the user extensions directory rather than
 installing a copy:

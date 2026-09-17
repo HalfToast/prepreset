@@ -1,18 +1,24 @@
 /**
  * Storage schema and sub-preset CRUD.
  *
- * Nothing here touches SillyTavern, the DOM, or globals (except `crypto`, and
- * only through newId), so the tests can run it under plain Node. Callers pass
- * the settings object in; this module never reaches for one itself.
+ * No SillyTavern, no DOM, and no globals beyond crypto and structuredClone, so
+ * the tests can run it under plain Node. Callers pass the settings object in.
  *
  * Accessors hand back live references into settings, so don't mutate what you
- * get back. createSubPreset and updateSubPresetToggles copy the toggles on the
- * way in, so mutating your own toggles object afterwards is safe.
+ * get back. createSubPreset and updateSubPresetOverrides copy on the way in, so
+ * mutating your own maps afterwards is safe.
  *
- * Shape: { version, masters: { [name]: { activeSubId, subPresets: [{ id, name, toggles }] } } }
+ * Shape (v2):
+ * {
+ *   version: 2,
+ *   enabledFields: { toggles: boolean, params: string[] },
+ *   masters: { [name]: { activeSubId, subPresets: [{ id, name, params, toggles }] } },
+ * }
+ *
+ * params and toggles hold only what differs from the master.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // crypto.randomUUID only exists in a secure context, so it's undefined when
 // SillyTavern is reached over plain http from a phone on the LAN. SillyTavern's
@@ -29,12 +35,42 @@ export function newId() {
     });
 }
 
-export function createDefaultSettings() {
-    return { version: SCHEMA_VERSION, masters: {} };
-}
-
 function isPlainObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Prompt toggles on, no parameters: identical to 1.1 until the user opts in.
+function sanitizeEnabledFields(fields) {
+    const raw = isPlainObject(fields) ? fields : {};
+    const params = Array.isArray(raw.params)
+        ? [...new Set(raw.params.filter(key => typeof key === 'string' && key.length > 0))]
+        : [];
+    return {
+        toggles: typeof raw.toggles === 'boolean' ? raw.toggles : true,
+        params,
+    };
+}
+
+// Parameter values are copied deeply; nothing guarantees they stay primitives.
+function copyParams(params) {
+    const result = {};
+    if (!isPlainObject(params)) {
+        return result;
+    }
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined) {
+            result[key] = structuredClone(value);
+        }
+    }
+    return result;
+}
+
+function copyToggles(toggles) {
+    return isPlainObject(toggles) ? { ...toggles } : {};
+}
+
+export function createDefaultSettings() {
+    return { version: SCHEMA_VERSION, enabledFields: sanitizeEnabledFields(undefined), masters: {} };
 }
 
 function isValidSubPreset(sub) {
@@ -44,13 +80,16 @@ function isValidSubPreset(sub) {
         && isPlainObject(sub.toggles);
 }
 
-// Coerces anything into a valid settings object. Malformed masters and
-// sub-presets are dropped rather than repaired, and an activeSubId that no
-// longer resolves is cleared.
+// Coerces anything into valid v2 settings. Malformed masters and sub-presets are
+// dropped rather than repaired, and an activeSubId that no longer resolves is
+// cleared.
 //
-// If there is ever a v2, check `version` here first. Without that check an old
-// v1 object falls through to createDefaultSettings() and the user silently
-// loses every sub-preset.
+// v1 sub-presets get an empty params map and keep their full toggle map, so
+// they behave as they did in 1.1 until the next save rewrites toggles as a
+// diff. v2 only adds to v1, so both go through the same code.
+//
+// A v3 that changes the shape needs to branch on `version` first, or older data
+// will be lost here.
 export function migrate(settings) {
     if (!isPlainObject(settings) || !isPlainObject(settings.masters)) {
         return createDefaultSettings();
@@ -67,7 +106,8 @@ export function migrate(settings) {
             ? master.subPresets.filter(isValidSubPreset).map(sub => ({
                 id: sub.id,
                 name: sub.name,
-                toggles: { ...sub.toggles },
+                params: copyParams(sub.params),
+                toggles: copyToggles(sub.toggles),
             }))
             : [];
 
@@ -78,7 +118,24 @@ export function migrate(settings) {
         masters[name] = { activeSubId, subPresets };
     }
 
-    return { version: SCHEMA_VERSION, masters };
+    return {
+        version: SCHEMA_VERSION,
+        enabledFields: sanitizeEnabledFields(settings.enabledFields),
+        masters,
+    };
+}
+
+// Creates the defaults if they're missing.
+export function getEnabledFields(settings) {
+    if (!isPlainObject(settings.enabledFields)) {
+        settings.enabledFields = sanitizeEnabledFields(undefined);
+    }
+    return settings.enabledFields;
+}
+
+export function setEnabledFields(settings, fields) {
+    settings.enabledFields = sanitizeEnabledFields(fields);
+    return settings.enabledFields;
 }
 
 // Creates the entry if the master doesn't have one yet.
@@ -111,11 +168,12 @@ export function setActiveSubPreset(settings, masterName, subId) {
     return master.activeSubId;
 }
 
-export function createSubPreset(settings, masterName, name, toggles) {
+export function createSubPreset(settings, masterName, name, overrides) {
     const sub = {
         id: newId(),
         name: String(name),
-        toggles: { ...toggles },
+        params: copyParams(overrides?.params),
+        toggles: copyToggles(overrides?.toggles),
     };
     getMaster(settings, masterName).subPresets.push(sub);
     return sub;
@@ -135,7 +193,7 @@ export function duplicateSubPreset(settings, masterName, subId) {
     if (!sub) {
         return null;
     }
-    return createSubPreset(settings, masterName, `${sub.name} (copy)`, sub.toggles);
+    return createSubPreset(settings, masterName, `${sub.name} (copy)`, { params: sub.params, toggles: sub.toggles });
 }
 
 export function deleteSubPreset(settings, masterName, subId) {
@@ -151,11 +209,12 @@ export function deleteSubPreset(settings, masterName, subId) {
     return true;
 }
 
-export function updateSubPresetToggles(settings, masterName, subId, toggles) {
+export function updateSubPresetOverrides(settings, masterName, subId, overrides) {
     const sub = findSubPreset(settings, masterName, subId);
     if (!sub) {
         return null;
     }
-    sub.toggles = { ...toggles };
+    sub.params = copyParams(overrides?.params);
+    sub.toggles = copyToggles(overrides?.toggles);
     return sub;
 }
