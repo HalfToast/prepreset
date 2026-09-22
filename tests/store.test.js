@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    SCHEMA_VERSION, createDefaultSettings, migrate, getMaster, listSubPresets,
-    findSubPreset, getActiveSubPreset, setActiveSubPreset, createSubPreset,
-    renameSubPreset, duplicateSubPreset, deleteSubPreset, updateSubPresetOverrides,
-    getEnabledFields, setEnabledFields, newId,
+    SCHEMA_VERSION, MODES, createDefaultSettings, migrate, getMode, setMode,
+    getMaster, listSubPresets, findSubPreset, getActiveSubPreset, setActiveSubPreset,
+    createSubPreset, renameSubPreset, duplicateSubPreset, deleteSubPreset,
+    updateSubPresetOverrides, getEnabledFields, setEnabledFields, newId,
 } from '../src/store.js';
 
 const DEFAULT_FIELDS = { toggles: true, params: [] };
@@ -13,11 +13,27 @@ test('SCHEMA_VERSION is 2', () => {
     assert.equal(SCHEMA_VERSION, 2);
 });
 
-test('createDefaultSettings returns empty v2 settings', () => {
+test('createDefaultSettings returns empty v2 settings with manual mode', () => {
     const settings = createDefaultSettings();
     assert.equal(settings.version, 2);
+    assert.equal(settings.mode, 'manual');
     assert.deepEqual(settings.enabledFields, DEFAULT_FIELDS);
     assert.deepEqual(settings.masters, {});
+});
+
+test('migrate preserves valid mode or defaults to manual', () => {
+    assert.equal(migrate({}).mode, 'manual');
+    assert.equal(migrate({ mode: 'autobound', masters: {} }).mode, 'autobound');
+    assert.equal(migrate({ mode: 'invalid', masters: {} }).mode, 'manual');
+});
+
+test('getMode and setMode manage mode cleanly', () => {
+    const settings = createDefaultSettings();
+    assert.equal(getMode(settings), 'manual');
+    setMode(settings, 'autobound');
+    assert.equal(getMode(settings), 'autobound');
+    setMode(settings, 'invalid_mode');
+    assert.equal(getMode(settings), 'manual');
 });
 
 test('migrate replaces junk input with defaults', () => {
@@ -51,6 +67,7 @@ test('migrate stamps the version onto unversioned settings', () => {
 test('migrate passes v2 data through', () => {
     const input = {
         version: 2,
+        mode: 'manual',
         enabledFields: { toggles: false, params: ['temperature', 'openai_max_context'] },
         masters: {
             M: {

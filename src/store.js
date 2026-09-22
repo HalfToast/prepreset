@@ -20,6 +20,15 @@
 
 export const SCHEMA_VERSION = 2;
 
+export const MODES = {
+    MANUAL: 'manual',
+    AUTOBOUND: 'autobound',
+};
+
+export function sanitizeMode(mode) {
+    return mode === MODES.AUTOBOUND ? MODES.AUTOBOUND : MODES.MANUAL;
+}
+
 // crypto.randomUUID only exists in a secure context, so it's undefined when
 // SillyTavern is reached over plain http from a phone on the LAN. SillyTavern's
 // own uuidv4() guards the same way (public/scripts/utils.js:1961); this is a
@@ -70,7 +79,12 @@ function copyToggles(toggles) {
 }
 
 export function createDefaultSettings() {
-    return { version: SCHEMA_VERSION, enabledFields: sanitizeEnabledFields(undefined), masters: {} };
+    return {
+        version: SCHEMA_VERSION,
+        mode: MODES.MANUAL,
+        enabledFields: sanitizeEnabledFields(undefined),
+        masters: {},
+    };
 }
 
 function isValidSubPreset(sub) {
@@ -120,9 +134,19 @@ export function migrate(settings) {
 
     return {
         version: SCHEMA_VERSION,
+        mode: sanitizeMode(settings.mode),
         enabledFields: sanitizeEnabledFields(settings.enabledFields),
         masters,
     };
+}
+
+export function getMode(settings) {
+    return sanitizeMode(settings?.mode);
+}
+
+export function setMode(settings, mode) {
+    settings.mode = sanitizeMode(mode);
+    return settings.mode;
 }
 
 // Creates the defaults if they're missing.

@@ -20,16 +20,20 @@ master still reach your sub-presets. Pick one, change what you want, and press
 Save.
 
 * Sub-presets belong to the master preset they were created under.
-* Switching is manual. Nothing is applied on character or chat switch.
-* Saving is explicit. Changing values never touches a stored sub-preset until
-  you press Save.
+* Two operating modes: Manual (Sub-presets) and Auto-bound (Per-chat).
+* In Manual mode, switching is manual and saving is explicit. Changing values
+  never touches a stored sub-preset until you press Save.
+* In Auto-bound mode, presets and toggles automatically follow each chat.
+  The sub-preset dropdown is hidden, and overrides are saved directly into the
+  active chat.
 * Prepreset never writes to your preset files. Sub-presets live in
-  `settings.json` under `extension_settings.prepreset`.
+  `settings.json` under `extension_settings.prepreset`, while chat-bound overrides
+  live inside each chat's metadata.
 * Connection settings (source, model, URLs, proxy, credentials) are never part
-  of a sub-preset. Prompt text and order always come from the master too; only
-  on/off state is stored.
-* Saving the master while a sub-preset is active asks whether to save the
-  master's own values or what's on screen.
+  of a sub-preset or chat override. Prompt text and order always come from the
+  master too; only on/off state is stored.
+* Saving the master while a sub-preset or chat override is active asks whether
+  to save the master's own values or what's on screen.
 
 ## Install
 
@@ -75,6 +79,18 @@ master preset file.
 With unsaved changes, Save lights up and a `•` shows next to the name.
 Switching away (to another sub-preset, to Master, or via New or Duplicate) asks
 first.
+
+## Operating modes
+
+In the Prepreset drawer in the Extensions panel, choose your operating mode:
+
+* **Manual (Sub-presets)** *(default)*: Sub-preset dropdown row under the master
+  preset dropdown. Manage named variations with Save, New, Duplicate, and Delete.
+* **Auto-bound (Per-chat)**: Fully automated. The sub-preset dropdown is removed.
+  Each chat remembers its own master preset and any prompt toggle or parameter
+  overrides you make while in that chat. Switching chats automatically selects the
+  chat's master preset and applies its overrides. An in-chat toast notification
+  and a top-bar badge display the active preset and override count.
 
 ## Settings
 

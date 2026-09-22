@@ -39,8 +39,11 @@ export function installMasterSaveGuard(api) {
             return;
         }
 
+        const isAutobound = api.getMode && api.getMode() === 'autobound';
         const active = api.getActiveSub();
-        if (!active) {
+        const dirty = api.isDirty();
+
+        if (!active && !(isAutobound && dirty)) {
             return;
         }
 
@@ -49,12 +52,21 @@ export function installMasterSaveGuard(api) {
         // Restore what's on screen afterwards, not what's stored, or unsaved
         // edits would be lost.
         const liveValues = api.readLiveValues();
-        const dirty = api.isDirty();
 
-        const safeName = escapeHtml(active.name);
-        const body = dirty
-            ? `The sub-preset <b>${safeName}</b> is active and has unsaved changes, so the live values are neither the master preset's nor what <b>${safeName}</b> has stored.<br><br>Which values should be saved into the master preset?`
-            : `The sub-preset <b>${safeName}</b> is active, so the live values are its values, not the master preset's.<br><br>Which values should be saved into the master preset?`;
+        let body;
+        let customButtonLabel;
+
+        if (isAutobound) {
+            body = 'This chat has local preset overrides active, so the live values differ from the master preset.<br><br>Which values should be saved into the master preset?';
+            customButtonLabel = 'Current chat values';
+        } else {
+            const safeName = escapeHtml(active ? active.name : '');
+            body = dirty
+                ? `The sub-preset <b>${safeName}</b> is active and has unsaved changes, so the live values are neither the master preset's nor what <b>${safeName}</b> has stored.<br><br>Which values should be saved into the master preset?`
+                : `The sub-preset <b>${safeName}</b> is active, so the live values are its values, not the master preset's.<br><br>Which values should be saved into the master preset?`;
+            customButtonLabel = dirty ? 'Current values' : `"${active.name}" values`;
+        }
+
         const result = await new Popup(
             body,
             POPUP_TYPE.TEXT,
@@ -64,7 +76,7 @@ export function installMasterSaveGuard(api) {
                 cancelButton: 'Cancel',
                 // Rendered with textContent (popup.js:308), so this one must NOT be
                 // escaped or the entities show up literally.
-                customButtons: [dirty ? 'Current values' : `"${active.name}" values`],
+                customButtons: [customButtonLabel],
             },
         ).show();
 

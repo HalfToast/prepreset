@@ -33,7 +33,8 @@ export function injectSettingsPanel(panelApi) {
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
-            <small>Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master's value back.</small>
+            <div class="prepreset_mode_container"></div>
+            <small class="prepreset_fields_note">Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master's value back.</small>
             <div class="prepreset_fields"></div>
         </div>
     `;
@@ -46,7 +47,80 @@ export function injectSettingsPanel(panelApi) {
     renderSettingsPanel();
 }
 
+function renderModeSection() {
+    const container = document.querySelector(`#${PANEL_ID} .prepreset_mode_container`);
+    if (!container || !api) {
+        return;
+    }
+
+    const mode = api.getMode ? api.getMode() : 'manual';
+    const group = document.createElement('div');
+    group.classList.add('prepreset_mode_group');
+
+    const title = document.createElement('b');
+    title.textContent = 'Operating Mode';
+
+    const radioGroup = document.createElement('div');
+    radioGroup.classList.add('radio_group');
+
+    const manualLabel = document.createElement('label');
+    manualLabel.classList.add('radio_label');
+    const manualRadio = document.createElement('input');
+    manualRadio.type = 'radio';
+    manualRadio.name = 'prepreset_mode';
+    manualRadio.value = 'manual';
+    manualRadio.checked = mode === 'manual';
+    const manualText = document.createElement('span');
+    manualText.textContent = 'Manual (Sub-presets)';
+    manualLabel.append(manualRadio, manualText);
+
+    const autoboundLabel = document.createElement('label');
+    autoboundLabel.classList.add('radio_label');
+    const autoboundRadio = document.createElement('input');
+    autoboundRadio.type = 'radio';
+    autoboundRadio.name = 'prepreset_mode';
+    autoboundRadio.value = 'autobound';
+    autoboundRadio.checked = mode === 'autobound';
+    const autoboundText = document.createElement('span');
+    autoboundText.textContent = 'Auto-bound (Per-chat)';
+    autoboundLabel.append(autoboundRadio, autoboundText);
+
+    radioGroup.append(manualLabel, autoboundLabel);
+
+    const note = document.createElement('small');
+    note.classList.add('prepreset_mode_note');
+    note.textContent = mode === 'autobound'
+        ? 'Auto-bound: Each chat automatically remembers its Master preset, prompt toggles, and parameter overrides.'
+        : 'Manual: Use the sub-preset dropdown under the master preset to pick, save, and manage sub-presets.';
+
+    radioGroup.addEventListener('change', (event) => {
+        const target = event.target;
+        if (target instanceof HTMLInputElement && target.name === 'prepreset_mode') {
+            const newMode = target.value;
+            if (api.setMode) {
+                api.setMode(newMode);
+            }
+            if (api.onModeChanged) {
+                api.onModeChanged(newMode);
+            }
+            renderSettingsPanel();
+        }
+    });
+
+    group.append(title, radioGroup, note);
+    container.replaceChildren(group);
+
+    const fieldsNote = document.querySelector(`#${PANEL_ID} .prepreset_fields_note`);
+    if (fieldsNote) {
+        fieldsNote.textContent = mode === 'autobound'
+            ? 'Chats can only store checked fields. Unchecked fields follow the master preset. Unchecking a field that a chat changed puts the master\'s value back.'
+            : 'Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master\'s value back.';
+    }
+}
+
 export function renderSettingsPanel() {
+    renderModeSection();
+
     const container = document.querySelector(`#${PANEL_ID} .prepreset_fields`);
     if (!container || !api) {
         return;

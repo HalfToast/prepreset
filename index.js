@@ -7,13 +7,13 @@
  * unit-tested under plain Node.
  */
 
-import { saveSettingsDebounced, eventSource, event_types } from '/script.js';
-import { extension_settings } from '/scripts/extensions.js';
+import { saveSettingsDebounced, eventSource, event_types, chat_metadata, getCurrentChatId } from '/script.js';
+import { extension_settings, saveMetadataDebounced } from '/scripts/extensions.js';
 import { oai_settings, promptManager, settingsToUpdate, openai_setting_names } from '/scripts/openai.js';
 import { getPresetManager } from '/scripts/preset-manager.js';
 import {
     migrate, getActiveSubPreset, setActiveSubPreset, updateSubPresetOverrides, getEnabledFields,
-    setEnabledFields,
+    setEnabledFields, getMode, setMode, MODES,
 } from './src/store.js';
 import { findOrderEntry, readToggles, applyToggles } from './src/toggles.js';
 import { buildCatalogue } from './src/fields.js';
@@ -21,9 +21,14 @@ import {
     effectiveParams, effectiveToggles, diffParams, diffToggles, mergeParams, mergeToggles,
     paramsDirty, togglesDirty, releasedOverrides,
 } from './src/overlay.js';
-import { injectControlRow, renderControlRow } from './src/ui.js';
+import { injectControlRow, renderControlRow, setRowVisible } from './src/ui.js';
 import { installMasterSaveGuard } from './src/guard.js';
 import { injectSettingsPanel } from './src/settings-panel.js';
+import {
+    initAutobound, handleChatChanged, handleLiveValuesEdited,
+    getIsApplying, hideChatBadge,
+} from './src/autobound.js';
+import { escapeHtml } from './src/escape.js';
 
 export const EXTENSION_KEY = 'prepreset';
 export const EXTENSION_NAME = 'Prepreset';
@@ -40,6 +45,19 @@ export function persist() {
     saveSettingsDebounced();
 }
 
+export async function selectMasterPreset(presetName) {
+    const presetManager = getPresetManager('openai');
+    if (!presetManager) {
+        return false;
+    }
+    const presetValue = presetManager.findPreset(presetName);
+    if (!presetValue) {
+        return false;
+    }
+    await presetManager.selectPreset(presetValue);
+    return true;
+}
+
 // Entry point, called via the 'activate' manifest hook.
 export async function init() {
     if (initCalled) {
@@ -48,6 +66,22 @@ export async function init() {
     initCalled = true;
 
     extension_settings[EXTENSION_KEY] = migrate(extension_settings[EXTENSION_KEY]);
+
+    initAutobound({
+        getMode: () => getMode(getSettings()),
+        getMasterName,
+        selectMasterPreset,
+        readMasterValues,
+        applyValuesToLive,
+        diffLiveAgainstMaster,
+        enabledParamKeys,
+        getCurrentChatId,
+        getChatMetadata: () => chat_metadata,
+        saveMetadataDebounced,
+        toastInfo: (text, title) => toastr.info(text, title),
+        toastWarning: (text, title) => toastr.warning(text, title),
+        escapeHtml,
+    });
 
     installChangeHook();
     installParamChangeListener();
@@ -64,6 +98,7 @@ export async function init() {
     });
 
     installMasterSaveGuard({
+        getMode: () => getMode(getSettings()),
         getActiveSub,
         isDirty,
         readLiveValues,
@@ -75,6 +110,20 @@ export async function init() {
     // If the live value disagrees with the sub-preset, the unsaved marker shows it.
     injectSettingsPanel({
         getCatalogue,
+        getMode: () => getMode(getSettings()),
+        setMode: (mode) => {
+            setMode(getSettings(), mode);
+            persist();
+        },
+        onModeChanged: (mode) => {
+            setRowVisible(mode === MODES.MANUAL);
+            if (mode === MODES.AUTOBOUND) {
+                handleChatChanged();
+            } else {
+                hideChatBadge();
+                renderControlRow();
+            }
+        },
         getEnabledFields: () => getEnabledFields(getSettings()),
         setEnabledFields: (fields) => {
             const current = getEnabledFields(getSettings());
@@ -86,10 +135,24 @@ export async function init() {
         onChanged: () => {
             persist();
             notifySelectionChanged();
+            if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
+                handleLiveValuesEdited();
+            }
         },
     });
 
     onSelectionChanged(renderControlRow);
+
+    setRowVisible(getMode(getSettings()) === MODES.MANUAL);
+    if (getMode(getSettings()) === MODES.AUTOBOUND) {
+        handleChatChanged();
+    }
+
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        if (getMode(getSettings()) === MODES.AUTOBOUND) {
+            handleChatChanged();
+        }
+    });
 
     eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => {
         installChangeHook();
@@ -99,6 +162,9 @@ export async function init() {
         setActiveSubPreset(getSettings(), getMasterName(), null);
         persist();
         notifySelectionChanged();
+        if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
+            handleLiveValuesEdited();
+        }
     });
 
     // preset-manager.js awaits this before renamePreset() runs, and renamePreset
@@ -374,6 +440,17 @@ export function selectSubPreset(subId) {
 // SillyTavern persists live settings, and nothing touches the sub-preset until
 // the user saves. Enabled fields only.
 export function isDirty() {
+    if (getMode(getSettings()) === MODES.AUTOBOUND) {
+        const live = readLiveValues({ quiet: true });
+        const master = readMasterValues({ quiet: true });
+        if (!live || !master) {
+            return false;
+        }
+        if (paramsDirty(live.params, master.params, enabledParamKeys())) {
+            return true;
+        }
+        return live.toggles !== null && master.toggles !== null && togglesDirty(live.toggles, master.toggles);
+    }
     const sub = getActiveSub();
     if (!sub) {
         return false;
@@ -476,6 +553,9 @@ function installChangeHook() {
     const original = promptManager.saveServiceSettings.bind(promptManager);
     promptManager.saveServiceSettings = function () {
         notifySelectionChanged();
+        if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
+            handleLiveValuesEdited();
+        }
         return original();
     };
     changeHookInstalled = true;
@@ -496,6 +576,9 @@ function scheduleRender() {
     requestAnimationFrame(() => {
         renderScheduled = false;
         notifySelectionChanged();
+        if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
+            handleLiveValuesEdited();
+        }
     });
 }
 

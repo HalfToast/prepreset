@@ -19,6 +19,13 @@ const MASTER_VALUE = '';
 //   isDirty, saveActiveSubPreset, persist }
 let api = null;
 
+export function setRowVisible(visible) {
+    const row = document.getElementById(ROW_ID);
+    if (row) {
+        row.style.display = visible ? '' : 'none';
+    }
+}
+
 // Safe to call repeatedly.
 export function injectControlRow(uiApi) {
     api = uiApi;
