@@ -11,7 +11,11 @@
  * Shape (v2):
  * {
  *   version: 2,
- *   enabledFields: { toggles: boolean, params: string[] },
+ *   mode: 'manual' | 'autobound',
+ *   enabledFields: {
+ *     manual: { toggles: boolean, params: string[] },
+ *     autobound: { toggles: boolean, params: string[] },
+ *   },
  *   masters: { [name]: { activeSubId, subPresets: [{ id, name, params, toggles }] } },
  * }
  *
@@ -60,6 +64,26 @@ function sanitizeEnabledFields(fields) {
     };
 }
 
+function sanitizeModeEnabledFields(fields) {
+    if (!isPlainObject(fields)) {
+        return {
+            [MODES.MANUAL]: sanitizeEnabledFields(undefined),
+            [MODES.AUTOBOUND]: sanitizeEnabledFields(undefined),
+        };
+    }
+    if (isPlainObject(fields[MODES.MANUAL]) || isPlainObject(fields[MODES.AUTOBOUND])) {
+        return {
+            [MODES.MANUAL]: sanitizeEnabledFields(fields[MODES.MANUAL]),
+            [MODES.AUTOBOUND]: sanitizeEnabledFields(fields[MODES.AUTOBOUND]),
+        };
+    }
+    const legacy = sanitizeEnabledFields(fields);
+    return {
+        [MODES.MANUAL]: { ...legacy, params: [...legacy.params] },
+        [MODES.AUTOBOUND]: { ...legacy, params: [...legacy.params] },
+    };
+}
+
 // Parameter values are copied deeply; nothing guarantees they stay primitives.
 function copyParams(params) {
     const result = {};
@@ -82,7 +106,7 @@ export function createDefaultSettings() {
     return {
         version: SCHEMA_VERSION,
         mode: MODES.MANUAL,
-        enabledFields: sanitizeEnabledFields(undefined),
+        enabledFields: sanitizeModeEnabledFields(undefined),
         masters: {},
     };
 }
@@ -135,7 +159,7 @@ export function migrate(settings) {
     return {
         version: SCHEMA_VERSION,
         mode: sanitizeMode(settings.mode),
-        enabledFields: sanitizeEnabledFields(settings.enabledFields),
+        enabledFields: sanitizeModeEnabledFields(settings.enabledFields),
         masters,
     };
 }
@@ -149,17 +173,26 @@ export function setMode(settings, mode) {
     return settings.mode;
 }
 
-// Creates the defaults if they're missing.
-export function getEnabledFields(settings) {
-    if (!isPlainObject(settings.enabledFields)) {
-        settings.enabledFields = sanitizeEnabledFields(undefined);
+// Creates the defaults if they're missing. Defaults to current active mode if mode is omitted.
+export function getEnabledFields(settings, mode) {
+    if (!isPlainObject(settings?.enabledFields)) {
+        settings.enabledFields = sanitizeModeEnabledFields(undefined);
+    } else if (!isPlainObject(settings.enabledFields[MODES.MANUAL]) || !isPlainObject(settings.enabledFields[MODES.AUTOBOUND])) {
+        settings.enabledFields = sanitizeModeEnabledFields(settings.enabledFields);
     }
-    return settings.enabledFields;
+    const targetMode = sanitizeMode(mode ?? getMode(settings));
+    return settings.enabledFields[targetMode];
 }
 
-export function setEnabledFields(settings, fields) {
-    settings.enabledFields = sanitizeEnabledFields(fields);
-    return settings.enabledFields;
+export function setEnabledFields(settings, fields, mode) {
+    if (!isPlainObject(settings?.enabledFields)) {
+        settings.enabledFields = sanitizeModeEnabledFields(undefined);
+    } else if (!isPlainObject(settings.enabledFields[MODES.MANUAL]) || !isPlainObject(settings.enabledFields[MODES.AUTOBOUND])) {
+        settings.enabledFields = sanitizeModeEnabledFields(settings.enabledFields);
+    }
+    const targetMode = sanitizeMode(mode ?? getMode(settings));
+    settings.enabledFields[targetMode] = sanitizeEnabledFields(fields);
+    return settings.enabledFields[targetMode];
 }
 
 // Creates the entry if the master doesn't have one yet.

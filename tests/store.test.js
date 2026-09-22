@@ -17,7 +17,7 @@ test('createDefaultSettings returns empty v2 settings with manual mode', () => {
     const settings = createDefaultSettings();
     assert.equal(settings.version, 2);
     assert.equal(settings.mode, 'manual');
-    assert.deepEqual(settings.enabledFields, DEFAULT_FIELDS);
+    assert.deepEqual(settings.enabledFields, { manual: DEFAULT_FIELDS, autobound: DEFAULT_FIELDS });
     assert.deepEqual(settings.masters, {});
 });
 
@@ -53,7 +53,7 @@ test('migrate upgrades v1 settings', () => {
         },
     });
     assert.equal(result.version, 2);
-    assert.deepEqual(result.enabledFields, DEFAULT_FIELDS);
+    assert.deepEqual(result.enabledFields, { manual: DEFAULT_FIELDS, autobound: DEFAULT_FIELDS });
     assert.equal(result.masters['My Master'].activeSubId, 'a');
     assert.deepEqual(result.masters['My Master'].subPresets, [
         { id: 'a', name: 'Dark', params: {}, toggles: { main: true, nsfw: false } },
@@ -68,7 +68,10 @@ test('migrate passes v2 data through', () => {
     const input = {
         version: 2,
         mode: 'manual',
-        enabledFields: { toggles: false, params: ['temperature', 'openai_max_context'] },
+        enabledFields: {
+            manual: { toggles: false, params: ['temperature', 'openai_max_context'] },
+            autobound: { toggles: true, params: ['temperature'] },
+        },
         masters: {
             M: {
                 activeSubId: 'a',
@@ -98,14 +101,36 @@ test('migrate coerces a non-object params map to empty', () => {
 });
 
 test('migrate sanitises enabledFields', () => {
-    assert.deepEqual(migrate({ masters: {}, enabledFields: 'junk' }).enabledFields, DEFAULT_FIELDS);
+    assert.deepEqual(migrate({ masters: {}, enabledFields: 'junk' }).enabledFields, {
+        manual: DEFAULT_FIELDS,
+        autobound: DEFAULT_FIELDS,
+    });
     assert.deepEqual(
         migrate({ masters: {}, enabledFields: { toggles: 'yes', params: 'temperature' } }).enabledFields,
-        DEFAULT_FIELDS,
+        {
+            manual: DEFAULT_FIELDS,
+            autobound: DEFAULT_FIELDS,
+        },
     );
     assert.deepEqual(
         migrate({ masters: {}, enabledFields: { toggles: false, params: ['top_p', 7, '', 'top_p', 'future_key'] } }).enabledFields,
-        { toggles: false, params: ['top_p', 'future_key'] },
+        {
+            manual: { toggles: false, params: ['top_p', 'future_key'] },
+            autobound: { toggles: false, params: ['top_p', 'future_key'] },
+        },
+    );
+    assert.deepEqual(
+        migrate({
+            masters: {},
+            enabledFields: {
+                manual: { toggles: false, params: ['top_p'] },
+                autobound: { toggles: true, params: ['temperature'] },
+            },
+        }).enabledFields,
+        {
+            manual: { toggles: false, params: ['top_p'] },
+            autobound: { toggles: true, params: ['temperature'] },
+        },
     );
 });
 
@@ -289,19 +314,26 @@ test('updateSubPresetOverrides replaces both maps with copies', () => {
     assert.equal(updateSubPresetOverrides(settings, 'M', 'missing', {}), null);
 });
 
-test('getEnabledFields creates defaults when missing', () => {
+test('getEnabledFields creates defaults when missing and returns mode-specific fields', () => {
     const settings = { version: 2, masters: {} };
     const fields = getEnabledFields(settings);
     assert.deepEqual(fields, DEFAULT_FIELDS);
     assert.equal(getEnabledFields(settings), fields);
+    assert.deepEqual(getEnabledFields(settings, 'autobound'), DEFAULT_FIELDS);
 });
 
-test('setEnabledFields stores a sanitised copy', () => {
+test('setEnabledFields stores a sanitised copy per mode', () => {
     const settings = createDefaultSettings();
     const input = { toggles: false, params: ['temperature', 3, 'temperature'] };
     const stored = setEnabledFields(settings, input);
     assert.deepEqual(stored, { toggles: false, params: ['temperature'] });
-    assert.equal(getEnabledFields(settings), stored);
+    assert.deepEqual(getEnabledFields(settings), stored);
+    assert.deepEqual(getEnabledFields(settings, 'autobound'), DEFAULT_FIELDS);
+
+    setEnabledFields(settings, { toggles: true, params: ['top_p'] }, 'autobound');
+    assert.deepEqual(getEnabledFields(settings, 'autobound'), { toggles: true, params: ['top_p'] });
+    assert.deepEqual(getEnabledFields(settings, 'manual'), { toggles: false, params: ['temperature'] });
+
     input.params.push('top_p');
     assert.deepEqual(getEnabledFields(settings).params, ['temperature']);
 });

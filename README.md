@@ -94,16 +94,17 @@ In the Prepreset drawer in the Extensions panel, choose your operating mode:
 
 ## Settings
 
-The Prepreset drawer in the Extensions panel picks which fields sub-presets
-manage. By default it's only prompt toggles, so nothing else changes until you
-turn parameters on. Fields are grouped (Sampling, Context & length, Reasoning &
-tools, Prompt formatting, Media, Other) with All/None buttons for each group.
+The Prepreset drawer in the Extensions panel picks which fields are managed.
+Toggles and parameters are configured separately for **Manual** and **Auto-bound**
+modes; selecting an operating mode displays and edits that mode's managed fields.
+By default it's only prompt toggles, so nothing else changes until you turn
+parameters on. Fields are grouped (Sampling, Context & length, Reasoning & tools,
+Prompt formatting, Media, Other) with All/None buttons for each group.
 
-Unchecked fields are left alone when you switch sub-presets. If you uncheck a
-field the active sub-preset changed, the master's value is put back so it can't
-leak into the master preset file. Stored values aren't deleted; check the field
-again and reselect the sub-preset to get them back (unless you press Save
-first).
+Unchecked fields are left alone when you switch sub-presets or chats. If you
+uncheck a field that had active overrides, the master's value is put back so it
+can't leak into the master preset file. Stored values aren't deleted; check the
+field again to manage it again.
 
 ## Known limitations
 

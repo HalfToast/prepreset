@@ -113,8 +113,8 @@ function renderModeSection() {
     const fieldsNote = document.querySelector(`#${PANEL_ID} .prepreset_fields_note`);
     if (fieldsNote) {
         fieldsNote.textContent = mode === 'autobound'
-            ? 'Chats can only store checked fields. Unchecked fields follow the master preset. Unchecking a field that a chat changed puts the master\'s value back.'
-            : 'Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master\'s value back.';
+            ? 'Auto-bound fields: Chats can only store checked fields. Unchecked fields follow the master preset. Unchecking a field that a chat changed puts the master\'s value back.'
+            : 'Manual sub-preset fields: Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master\'s value back.';
     }
 }
 

@@ -24,13 +24,13 @@ export function formatIndicatorText(masterName, overrideCount) {
     const name = String(masterName || '');
     if (overrideCount <= 0) {
         return {
-            toastText: `Applied preset: <b>${name}</b>`,
+            toastText: `Applied preset: ${name}`,
             badgeText: name,
         };
     }
     const countText = overrideCount === 1 ? '1 override' : `${overrideCount} overrides`;
     return {
-        toastText: `Applied preset: <b>${name}</b> (${countText})`,
+        toastText: `Applied preset: ${name} (${countText})`,
         badgeText: `${name} (${overrideCount})`,
     };
 }

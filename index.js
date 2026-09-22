@@ -99,6 +99,7 @@ export async function init() {
 
     installMasterSaveGuard({
         getMode: () => getMode(getSettings()),
+        hasActiveChat: () => Boolean(getCurrentChatId()),
         getActiveSub,
         isDirty,
         readLiveValues,
@@ -441,6 +442,9 @@ export function selectSubPreset(subId) {
 // the user saves. Enabled fields only.
 export function isDirty() {
     if (getMode(getSettings()) === MODES.AUTOBOUND) {
+        if (!getCurrentChatId()) {
+            return false;
+        }
         const live = readLiveValues({ quiet: true });
         const master = readMasterValues({ quiet: true });
         if (!live || !master) {
@@ -509,7 +513,8 @@ export function saveActiveSubPreset() {
 // value would end up in the master preset file. Put the master's value back for
 // those overrides only; the user's other edits are left alone.
 function releaseDisabledOverrides(previous, next) {
-    const sub = getActiveSub();
+    const isAutobound = getMode(getSettings()) === MODES.AUTOBOUND;
+    const sub = isAutobound ? (chat_metadata?.prepreset ?? null) : getActiveSub();
     if (!sub) {
         return;
     }

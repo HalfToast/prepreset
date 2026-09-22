@@ -40,10 +40,11 @@ export function installMasterSaveGuard(api) {
         }
 
         const isAutobound = api.getMode && api.getMode() === 'autobound';
+        const hasActiveChat = api.hasActiveChat ? api.hasActiveChat() : true;
         const active = api.getActiveSub();
         const dirty = api.isDirty();
 
-        if (!active && !(isAutobound && dirty)) {
+        if (!active && !(isAutobound && hasActiveChat && dirty)) {
             return;
         }
 

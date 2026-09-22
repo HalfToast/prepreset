@@ -15,15 +15,15 @@ test('countOverrides counts toggles and params differing from master', () => {
 
 test('formatIndicatorText handles zero and non-zero overrides', () => {
     const zero = formatIndicatorText('Default', 0);
-    assert.equal(zero.toastText, 'Applied preset: <b>Default</b>');
+    assert.equal(zero.toastText, 'Applied preset: Default');
     assert.equal(zero.badgeText, 'Default');
 
     const single = formatIndicatorText('Story', 1);
-    assert.equal(single.toastText, 'Applied preset: <b>Story</b> (1 override)');
+    assert.equal(single.toastText, 'Applied preset: Story (1 override)');
     assert.equal(single.badgeText, 'Story (1)');
 
     const multiple = formatIndicatorText('Story', 3);
-    assert.equal(multiple.toastText, 'Applied preset: <b>Story</b> (3 overrides)');
+    assert.equal(multiple.toastText, 'Applied preset: Story (3 overrides)');
     assert.equal(multiple.badgeText, 'Story (3)');
 });
 
@@ -208,4 +208,21 @@ test('handleLiveValuesEdited records diff and saves metadata', () => {
     assert.equal(chatMetadata.prepreset.master, 'Master');
     assert.deepEqual(chatMetadata.prepreset.params, { temperature: 0.5 });
     assert.deepEqual(chatMetadata.prepreset.toggles, { promptA: false });
+});
+
+test('handleLiveValuesEdited suppresses updates when no chat is open', () => {
+    let saved = false;
+    const chatMetadata = { prepreset: {} };
+
+    initAutobound({
+        getMode: () => 'autobound',
+        getCurrentChatId: () => null,
+        getChatMetadata: () => chatMetadata,
+        getMasterName: () => 'Master',
+        diffLiveAgainstMaster: () => ({ params: { temperature: 0.5 }, toggles: {} }),
+        saveMetadataDebounced: () => { saved = true; },
+    });
+
+    handleLiveValuesEdited();
+    assert.equal(saved, false);
 });
