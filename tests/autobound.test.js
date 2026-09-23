@@ -14,14 +14,9 @@ test('countOverrides counts toggles and params differing from master', () => {
 });
 
 test('formatIndicatorText handles zero and non-zero overrides', () => {
-    const zero = formatIndicatorText('Default', 0);
-    assert.equal(zero.badgeText, 'Default');
-
-    const single = formatIndicatorText('Story', 1);
-    assert.equal(single.badgeText, 'Story (1)');
-
-    const multiple = formatIndicatorText('Story', 3);
-    assert.equal(multiple.badgeText, 'Story (3)');
+    assert.equal(formatIndicatorText('Default', 0), 'Applied preset: Default');
+    assert.equal(formatIndicatorText('Story', 1), 'Applied preset: Story (1 override)');
+    assert.equal(formatIndicatorText('Story', 3), 'Applied preset: Story (3 overrides)');
 });
 
 test('resolveEffectiveChatValues overlays chat diff onto master values', () => {
@@ -65,10 +60,11 @@ test('handleChatChanged no-ops when mode is manual or no active chat', async () 
     assert.equal(applied, false);
 });
 
-test('handleChatChanged switches master and applies chat overrides without toasts', async () => {
+test('handleChatChanged switches master and applies chat overrides with toast', async () => {
     let selectedMaster = null;
     let appliedValues = null;
-    let toastCalled = false;
+    let toastMessage = null;
+    let toastTitle = null;
     const chatMetadata = {
         prepreset: {
             master: 'Creative',
@@ -92,7 +88,7 @@ test('handleChatChanged switches master and applies chat overrides without toast
         }),
         enabledParamKeys: () => ['temperature', 'top_p'],
         applyValuesToLive: (val) => { appliedValues = val; return true; },
-        toastInfo: () => { toastCalled = true; },
+        toastInfo: (text, title) => { toastMessage = text; toastTitle = title; },
     });
 
     await handleChatChanged();
@@ -102,7 +98,8 @@ test('handleChatChanged switches master and applies chat overrides without toast
     assert.equal(appliedValues.params.top_p, 0.9);
     assert.equal(appliedValues.toggles.main, false);
     assert.equal(appliedValues.toggles.nsfw, true);
-    assert.equal(toastCalled, false);
+    assert.equal(toastMessage, 'Applied preset: Creative (2 overrides)');
+    assert.equal(toastTitle, 'Prepreset');
 });
 
 test('handleChatChanged handles deleted master preset gracefully', async () => {

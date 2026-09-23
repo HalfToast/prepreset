@@ -23,13 +23,10 @@ export function countOverrides(diff) {
 export function formatIndicatorText(masterName, overrideCount) {
     const name = String(masterName || '');
     if (overrideCount <= 0) {
-        return {
-            badgeText: name,
-        };
+        return `Applied preset: ${name}`;
     }
-    return {
-        badgeText: `${name} (${overrideCount})`,
-    };
+    const countText = overrideCount === 1 ? '1 override' : `${overrideCount} overrides`;
+    return `Applied preset: ${name} (${countText})`;
 }
 
 export function resolveEffectiveChatValues(masterValues, chatOverrides, enabledParamKeys) {
@@ -57,64 +54,25 @@ export function initAutobound(autoboundApi) {
     api = autoboundApi;
 }
 
-export function renderChatBadge(badgeText, tooltipText) {
-    if (typeof document === 'undefined') {
-        return;
-    }
-
-    let badge = document.getElementById(BADGE_ID);
-    if (!badge) {
-        badge = document.createElement('span');
-        badge.id = BADGE_ID;
-        badge.classList.add('prepreset_chat_badge');
-        badge.addEventListener('click', () => {
-            const drawerIcon = document.getElementById('leftNavDrawerIcon');
-            if (drawerIcon) {
-                drawerIcon.click();
-            }
-        });
-        const drawerIcon = document.getElementById('leftNavDrawerIcon');
-        if (drawerIcon) {
-            drawerIcon.insertAdjacentElement('afterend', badge);
-        } else {
-            const container = document.getElementById('top-bar')
-                || document.getElementById('sheldheader')
-                || document.getElementById('sheld');
-            if (container) {
-                container.append(badge);
-            }
-        }
-    }
-
-    if (!api || api.getMode() !== 'autobound' || !api.getCurrentChatId()) {
-        badge.style.display = 'none';
-        return;
-    }
-
-    badge.style.display = 'inline-flex';
-    badge.title = tooltipText || '';
-    badge.innerHTML = `<i class="fa-solid fa-sliders"></i> <span class="prepreset_badge_text">${api.escapeHtml ? api.escapeHtml(badgeText) : badgeText}</span>`;
-}
-
 export function hideChatBadge() {
     if (typeof document === 'undefined') {
         return;
     }
     const badge = document.getElementById(BADGE_ID);
     if (badge) {
-        badge.style.display = 'none';
+        badge.remove();
     }
 }
 
 export async function handleChatChanged() {
+    hideChatBadge();
+
     if (!api || api.getMode() !== 'autobound' || !api.getCurrentChatId()) {
-        hideChatBadge();
         return;
     }
 
     const chatMetadata = api.getChatMetadata();
     if (!chatMetadata) {
-        hideChatBadge();
         return;
     }
 
@@ -138,8 +96,10 @@ export async function handleChatChanged() {
             const effective = resolveEffectiveChatValues(masterValues, chatPreset, api.enabledParamKeys());
             api.applyValuesToLive(effective);
             const overrideCount = countOverrides(chatPreset);
-            const { badgeText } = formatIndicatorText(api.getMasterName(), overrideCount);
-            renderChatBadge(badgeText, `Prepreset (Auto-bound): ${overrideCount} overrides active`);
+            const message = formatIndicatorText(api.getMasterName(), overrideCount);
+            if (api.toastInfo) {
+                api.toastInfo(message, 'Prepreset');
+            }
         } finally {
             isApplying = false;
         }
@@ -158,8 +118,10 @@ export async function handleChatChanged() {
             if (api.saveMetadataDebounced) {
                 api.saveMetadataDebounced();
             }
-            const { badgeText } = formatIndicatorText(api.getMasterName(), 0);
-            renderChatBadge(badgeText, 'Prepreset (Auto-bound): clean master preset active');
+            const message = formatIndicatorText(api.getMasterName(), 0);
+            if (api.toastInfo) {
+                api.toastInfo(message, 'Prepreset');
+            }
         } finally {
             isApplying = false;
         }
@@ -190,8 +152,4 @@ export function handleLiveValuesEdited() {
     if (api.saveMetadataDebounced) {
         api.saveMetadataDebounced();
     }
-
-    const count = countOverrides(diff);
-    const { badgeText } = formatIndicatorText(api.getMasterName(), count);
-    renderChatBadge(badgeText, `Prepreset (Auto-bound): ${count} overrides active`);
 }

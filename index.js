@@ -78,7 +78,7 @@ export async function init() {
         getCurrentChatId,
         getChatMetadata: () => chat_metadata,
         saveMetadataDebounced,
-        toastInfo: (text, title) => toastr.info(text, title),
+        toastInfo: (text, title) => toastr.info(text, title, { timeOut: 3000, extendedTimeOut: 1000 }),
         toastWarning: (text, title) => toastr.warning(text, title),
         escapeHtml,
     });
