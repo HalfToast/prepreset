@@ -24,13 +24,10 @@ export function formatIndicatorText(masterName, overrideCount) {
     const name = String(masterName || '');
     if (overrideCount <= 0) {
         return {
-            toastText: `Applied preset: ${name}`,
             badgeText: name,
         };
     }
-    const countText = overrideCount === 1 ? '1 override' : `${overrideCount} overrides`;
     return {
-        toastText: `Applied preset: ${name} (${countText})`,
         badgeText: `${name} (${overrideCount})`,
     };
 }
@@ -76,11 +73,16 @@ export function renderChatBadge(badgeText, tooltipText) {
                 drawerIcon.click();
             }
         });
-        const container = document.getElementById('top-bar')
-            || document.getElementById('sheldheader')
-            || document.getElementById('sheld');
-        if (container) {
-            container.append(badge);
+        const drawerIcon = document.getElementById('leftNavDrawerIcon');
+        if (drawerIcon) {
+            drawerIcon.insertAdjacentElement('afterend', badge);
+        } else {
+            const container = document.getElementById('top-bar')
+                || document.getElementById('sheldheader')
+                || document.getElementById('sheld');
+            if (container) {
+                container.append(badge);
+            }
         }
     }
 
@@ -91,7 +93,7 @@ export function renderChatBadge(badgeText, tooltipText) {
 
     badge.style.display = 'inline-flex';
     badge.title = tooltipText || '';
-    badge.innerHTML = `<i class="fa-solid fa-sliders"></i> <span>${api.escapeHtml ? api.escapeHtml(badgeText) : badgeText}</span>`;
+    badge.innerHTML = `<i class="fa-solid fa-sliders"></i> <span class="prepreset_badge_text">${api.escapeHtml ? api.escapeHtml(badgeText) : badgeText}</span>`;
 }
 
 export function hideChatBadge() {
@@ -136,10 +138,7 @@ export async function handleChatChanged() {
             const effective = resolveEffectiveChatValues(masterValues, chatPreset, api.enabledParamKeys());
             api.applyValuesToLive(effective);
             const overrideCount = countOverrides(chatPreset);
-            const { toastText, badgeText } = formatIndicatorText(api.getMasterName(), overrideCount);
-            if (api.toastInfo) {
-                api.toastInfo(toastText, 'Prepreset');
-            }
+            const { badgeText } = formatIndicatorText(api.getMasterName(), overrideCount);
             renderChatBadge(badgeText, `Prepreset (Auto-bound): ${overrideCount} overrides active`);
         } finally {
             isApplying = false;
@@ -159,10 +158,7 @@ export async function handleChatChanged() {
             if (api.saveMetadataDebounced) {
                 api.saveMetadataDebounced();
             }
-            const { toastText, badgeText } = formatIndicatorText(api.getMasterName(), 0);
-            if (api.toastInfo) {
-                api.toastInfo(toastText, 'Prepreset');
-            }
+            const { badgeText } = formatIndicatorText(api.getMasterName(), 0);
             renderChatBadge(badgeText, 'Prepreset (Auto-bound): clean master preset active');
         } finally {
             isApplying = false;

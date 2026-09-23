@@ -15,15 +15,12 @@ test('countOverrides counts toggles and params differing from master', () => {
 
 test('formatIndicatorText handles zero and non-zero overrides', () => {
     const zero = formatIndicatorText('Default', 0);
-    assert.equal(zero.toastText, 'Applied preset: Default');
     assert.equal(zero.badgeText, 'Default');
 
     const single = formatIndicatorText('Story', 1);
-    assert.equal(single.toastText, 'Applied preset: Story (1 override)');
     assert.equal(single.badgeText, 'Story (1)');
 
     const multiple = formatIndicatorText('Story', 3);
-    assert.equal(multiple.toastText, 'Applied preset: Story (3 overrides)');
     assert.equal(multiple.badgeText, 'Story (3)');
 });
 
@@ -68,10 +65,10 @@ test('handleChatChanged no-ops when mode is manual or no active chat', async () 
     assert.equal(applied, false);
 });
 
-test('handleChatChanged switches master and applies chat overrides', async () => {
+test('handleChatChanged switches master and applies chat overrides without toasts', async () => {
     let selectedMaster = null;
     let appliedValues = null;
-    let toast = null;
+    let toastCalled = false;
     const chatMetadata = {
         prepreset: {
             master: 'Creative',
@@ -95,7 +92,7 @@ test('handleChatChanged switches master and applies chat overrides', async () =>
         }),
         enabledParamKeys: () => ['temperature', 'top_p'],
         applyValuesToLive: (val) => { appliedValues = val; return true; },
-        toastInfo: (text) => { toast = text; },
+        toastInfo: () => { toastCalled = true; },
     });
 
     await handleChatChanged();
@@ -105,8 +102,7 @@ test('handleChatChanged switches master and applies chat overrides', async () =>
     assert.equal(appliedValues.params.top_p, 0.9);
     assert.equal(appliedValues.toggles.main, false);
     assert.equal(appliedValues.toggles.nsfw, true);
-    assert.match(toast, /Creative/);
-    assert.match(toast, /2 overrides/);
+    assert.equal(toastCalled, false);
 });
 
 test('handleChatChanged handles deleted master preset gracefully', async () => {

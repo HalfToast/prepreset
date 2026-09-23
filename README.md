@@ -89,8 +89,8 @@ In the Prepreset drawer in the Extensions panel, choose your operating mode:
 * **Auto-bound (Per-chat)**: Fully automated. The sub-preset dropdown is removed.
   Each chat remembers its own master preset and any prompt toggle or parameter
   overrides you make while in that chat. Switching chats automatically selects the
-  chat's master preset and applies its overrides. An in-chat toast notification
-  and a top-bar badge display the active preset and override count.
+  chat's master preset and applies its overrides. A compact top-bar badge displays
+  the active preset and override count.
 
 ## Settings
 
