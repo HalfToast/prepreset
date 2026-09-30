@@ -27,7 +27,7 @@ test('migrate preserves valid mode or defaults to manual', () => {
     assert.equal(migrate({ mode: 'invalid', masters: {} }).mode, 'manual');
 });
 
-test('getMode and setMode manage mode cleanly', () => {
+test('setMode rejects anything but a real mode', () => {
     const settings = createDefaultSettings();
     assert.equal(getMode(settings), 'manual');
     setMode(settings, 'autobound');
@@ -314,7 +314,7 @@ test('updateSubPresetOverrides replaces both maps with copies', () => {
     assert.equal(updateSubPresetOverrides(settings, 'M', 'missing', {}), null);
 });
 
-test('getEnabledFields creates defaults when missing and returns mode-specific fields', () => {
+test('getEnabledFields creates defaults and reads per mode', () => {
     const settings = { version: 2, masters: {} };
     const fields = getEnabledFields(settings);
     assert.deepEqual(fields, DEFAULT_FIELDS);

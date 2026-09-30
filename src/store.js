@@ -64,6 +64,8 @@ function sanitizeEnabledFields(fields) {
     };
 }
 
+// Settings written before modes existed stored one shared set of fields, which
+// becomes the starting point for both.
 function sanitizeModeEnabledFields(fields) {
     if (!isPlainObject(fields)) {
         return {
@@ -173,26 +175,27 @@ export function setMode(settings, mode) {
     return settings.mode;
 }
 
-// Creates the defaults if they're missing. Defaults to current active mode if mode is omitted.
-export function getEnabledFields(settings, mode) {
-    if (!isPlainObject(settings?.enabledFields)) {
-        settings.enabledFields = sanitizeModeEnabledFields(undefined);
-    } else if (!isPlainObject(settings.enabledFields[MODES.MANUAL]) || !isPlainObject(settings.enabledFields[MODES.AUTOBOUND])) {
-        settings.enabledFields = sanitizeModeEnabledFields(settings.enabledFields);
+// Repairs anything missing or left over from an older shape.
+function ensureModeFields(settings) {
+    const fields = settings.enabledFields;
+    if (!isPlainObject(fields)
+        || !isPlainObject(fields[MODES.MANUAL])
+        || !isPlainObject(fields[MODES.AUTOBOUND])) {
+        settings.enabledFields = sanitizeModeEnabledFields(fields);
     }
-    const targetMode = sanitizeMode(mode ?? getMode(settings));
-    return settings.enabledFields[targetMode];
+    return settings.enabledFields;
+}
+
+// Without a mode, the active one.
+export function getEnabledFields(settings, mode) {
+    return ensureModeFields(settings)[sanitizeMode(mode ?? getMode(settings))];
 }
 
 export function setEnabledFields(settings, fields, mode) {
-    if (!isPlainObject(settings?.enabledFields)) {
-        settings.enabledFields = sanitizeModeEnabledFields(undefined);
-    } else if (!isPlainObject(settings.enabledFields[MODES.MANUAL]) || !isPlainObject(settings.enabledFields[MODES.AUTOBOUND])) {
-        settings.enabledFields = sanitizeModeEnabledFields(settings.enabledFields);
-    }
-    const targetMode = sanitizeMode(mode ?? getMode(settings));
-    settings.enabledFields[targetMode] = sanitizeEnabledFields(fields);
-    return settings.enabledFields[targetMode];
+    const all = ensureModeFields(settings);
+    const target = sanitizeMode(mode ?? getMode(settings));
+    all[target] = sanitizeEnabledFields(fields);
+    return all[target];
 }
 
 // Creates the entry if the master doesn't have one yet.

@@ -20,7 +20,7 @@ const BUTTON_SELECTOR = '#update_oai_preset';
 let bypass = false;
 let installed = false;
 
-// api: { getActiveSub, isDirty, readLiveValues, readMasterValues, applyValuesToLive }
+// api: { getMode, hasActiveChat, getActiveSub, isDirty, readLiveValues, readMasterValues, applyValuesToLive }
 export function installMasterSaveGuard(api) {
     if (installed) {
         return;
@@ -39,12 +39,13 @@ export function installMasterSaveGuard(api) {
             return;
         }
 
-        const isAutobound = api.getMode && api.getMode() === 'autobound';
-        const hasActiveChat = api.hasActiveChat ? api.hasActiveChat() : true;
-        const active = api.getActiveSub();
+        const isAutobound = api.getMode() === 'autobound';
+        // A sub-preset selection only means anything in Manual mode. One left
+        // over from before the switch isn't live, so it mustn't open the popup.
+        const active = isAutobound ? null : api.getActiveSub();
         const dirty = api.isDirty();
 
-        if (!active && !(isAutobound && hasActiveChat && dirty)) {
+        if (!active && !(isAutobound && api.hasActiveChat() && dirty)) {
             return;
         }
 

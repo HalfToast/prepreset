@@ -80,6 +80,18 @@ export function effectiveToggles(masterToggles, overrides) {
     return { ...(masterToggles ?? {}), ...(overrides ?? {}) };
 }
 
+// Master values with a sub-preset's or chat's overrides laid on top, for enabled
+// fields. toggles stays null when prompt toggles aren't managed.
+export function effectiveValues(masterValues, overrides, enabledKeys) {
+    const master = masterValues ?? {};
+    return {
+        params: effectiveParams(master.params, overrides?.params, enabledKeys),
+        toggles: master.toggles === null || master.toggles === undefined
+            ? null
+            : effectiveToggles(master.toggles, overrides?.toggles),
+    };
+}
+
 // Only prompts the master has, same rule as diffParams.
 export function diffToggles(liveToggles, masterToggles) {
     const live = liveToggles ?? {};

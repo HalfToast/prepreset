@@ -3,13 +3,15 @@
  * prompt toggles on top of a master preset.
  *
  * The only module that touches SillyTavern globals. The logic lives in
- * src/overlay.js, src/fields.js, src/store.js and src/toggles.js, which are
- * unit-tested under plain Node.
+ * src/overlay.js, src/autobound.js, src/fields.js, src/store.js and
+ * src/toggles.js, which are unit-tested under plain Node.
  */
 
 import { saveSettingsDebounced, eventSource, event_types, chat_metadata, getCurrentChatId } from '/script.js';
 import { extension_settings, saveMetadataDebounced } from '/scripts/extensions.js';
-import { oai_settings, promptManager, settingsToUpdate, openai_setting_names } from '/scripts/openai.js';
+import {
+    oai_settings, promptManager, settingsToUpdate, openai_setting_names, getPresetApplicationPromise,
+} from '/scripts/openai.js';
 import { getPresetManager } from '/scripts/preset-manager.js';
 import {
     migrate, getActiveSubPreset, setActiveSubPreset, updateSubPresetOverrides, getEnabledFields,
@@ -18,17 +20,16 @@ import {
 import { findOrderEntry, readToggles, applyToggles } from './src/toggles.js';
 import { buildCatalogue } from './src/fields.js';
 import {
-    effectiveParams, effectiveToggles, diffParams, diffToggles, mergeParams, mergeToggles,
-    paramsDirty, togglesDirty, releasedOverrides,
+    diffParams, diffToggles, mergeParams, mergeToggles,
+    paramsDirty, togglesDirty, releasedOverrides, effectiveValues,
 } from './src/overlay.js';
 import { injectControlRow, renderControlRow, setRowVisible } from './src/ui.js';
 import { installMasterSaveGuard } from './src/guard.js';
 import { injectSettingsPanel } from './src/settings-panel.js';
 import {
-    initAutobound, handleChatChanged, handleLiveValuesEdited,
-    getIsApplying, hideChatBadge,
+    initAutobound, handleChatChanged, handleLiveValuesEdited, releaseChatOverrides,
+    handleMasterRenameBefore, handleMasterRenamed,
 } from './src/autobound.js';
-import { escapeHtml } from './src/escape.js';
 
 export const EXTENSION_KEY = 'prepreset';
 export const EXTENSION_NAME = 'Prepreset';
@@ -72,15 +73,17 @@ export async function init() {
         getMasterName,
         selectMasterPreset,
         readMasterValues,
+        readLiveValues,
         applyValuesToLive,
-        diffLiveAgainstMaster,
+        applyMasterValuesFor,
         enabledParamKeys,
         getCurrentChatId,
         getChatMetadata: () => chat_metadata,
         saveMetadataDebounced,
         toastInfo: (text, title) => toastr.info(text, title, { timeOut: 3000, extendedTimeOut: 1000 }),
         toastWarning: (text, title) => toastr.warning(text, title),
-        escapeHtml,
+        nextTask: () => new Promise(resolve => setTimeout(resolve, 0)),
+        waitForPresetApplication: () => getPresetApplicationPromise(),
     });
 
     installChangeHook();
@@ -116,12 +119,15 @@ export async function init() {
             setMode(getSettings(), mode);
             persist();
         },
+        // Hand whatever the old mode had live back to the master, or it sits
+        // there unmanaged and the next master save writes it into the file.
         onModeChanged: (mode) => {
             setRowVisible(mode === MODES.MANUAL);
             if (mode === MODES.AUTOBOUND) {
+                releaseActiveSubPreset();
                 handleChatChanged();
             } else {
-                hideChatBadge();
+                releaseChatOverrides();
                 renderControlRow();
             }
         },
@@ -136,9 +142,7 @@ export async function init() {
         onChanged: () => {
             persist();
             notifySelectionChanged();
-            if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
-                handleLiveValuesEdited();
-            }
+            handleLiveValuesEdited();
         },
     });
 
@@ -146,6 +150,9 @@ export async function init() {
 
     setRowVisible(getMode(getSettings()) === MODES.MANUAL);
     if (getMode(getSettings()) === MODES.AUTOBOUND) {
+        // A Manual selection left over from an earlier version isn't live here,
+        // and would show as a stale choice on switching back to Manual.
+        setActiveSubPreset(getSettings(), getMasterName(), null);
         handleChatChanged();
     }
 
@@ -163,9 +170,7 @@ export async function init() {
         setActiveSubPreset(getSettings(), getMasterName(), null);
         persist();
         notifySelectionChanged();
-        if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
-            handleLiveValuesEdited();
-        }
+        handleLiveValuesEdited();
     });
 
     // preset-manager.js awaits this before renamePreset() runs, and renamePreset
@@ -177,8 +182,12 @@ export async function init() {
     // Nothing re-applies the sub-preset afterwards, on purpose: the rename changes
     // the master's name, so the OAI_PRESET_CHANGED_AFTER handler above resets the
     // selection to Master anyway.
-    eventSource.on(event_types.PRESET_RENAMED_BEFORE, ({ apiId } = {}) => {
+    eventSource.on(event_types.PRESET_RENAMED_BEFORE, ({ apiId, oldName, newName } = {}) => {
         if (apiId !== 'openai') {
+            return;
+        }
+        if (getMode(getSettings()) === MODES.AUTOBOUND) {
+            handleMasterRenameBefore(oldName, newName);
             return;
         }
         if (!getActiveSub()) {
@@ -189,6 +198,17 @@ export async function init() {
             return;
         }
         applyValuesToLive(masterValues);
+    });
+
+    // The open chat follows the rename and gets its overrides back. Deliberately
+    // not returned: emit awaits every listener, and the overrides have to stay
+    // off until SillyTavern's second save (see handleMasterRenamed).
+    eventSource.on(event_types.PRESET_RENAMED, ({ apiId, oldName, newName } = {}) => {
+        if (apiId !== 'openai' || getMode(getSettings()) !== MODES.AUTOBOUND) {
+            return;
+        }
+        handleMasterRenamed(oldName, newName)
+            .catch(error => console.error(`[${EXTENSION_NAME}] re-applying chat preset after rename failed`, error));
     });
 
     console.debug(`[${EXTENSION_NAME}] initialized`, getSettings());
@@ -412,11 +432,7 @@ export function getActiveSub() {
 }
 
 function effectiveValuesFor(masterValues, sub) {
-    const keys = enabledParamKeys();
-    return {
-        params: effectiveParams(masterValues.params, sub.params, keys),
-        toggles: masterValues.toggles === null ? null : effectiveToggles(masterValues.toggles, sub.toggles),
-    };
+    return effectiveValues(masterValues, sub, enabledParamKeys());
 }
 
 // Null selects the master. Every enabled field the target doesn't override gets
@@ -508,23 +524,17 @@ export function saveActiveSubPreset() {
     return true;
 }
 
-// When a field is switched off, the sub-preset's override stays live with
-// nothing managing it. Every master save path only swaps managed fields, so that
-// value would end up in the master preset file. Put the master's value back for
-// those overrides only; the user's other edits are left alone.
-function releaseDisabledOverrides(previous, next) {
-    const isAutobound = getMode(getSettings()) === MODES.AUTOBOUND;
-    const sub = isAutobound ? (chat_metadata?.prepreset ?? null) : getActiveSub();
-    if (!sub) {
-        return;
-    }
-    const { paramKeys, toggleIds } = releasedOverrides(previous, next, sub);
+// Puts the master's own values back for exactly these fields and prompts,
+// whether or not they're currently enabled. Used to hand back overrides nothing
+// will manage any more; every master save path reads live values, so leaving
+// them in place would write them into the preset file.
+export function applyMasterValuesFor({ paramKeys = [], toggleIds = [] } = {}) {
     if (paramKeys.length === 0 && toggleIds.length === 0) {
-        return;
+        return true;
     }
     const preset = getMasterPreset();
     if (!preset) {
-        return;
+        return false;
     }
     const params = {};
     for (const key of paramKeys) {
@@ -544,7 +554,37 @@ function releaseDisabledOverrides(previous, next) {
             }
         }
     }
-    applyValuesToLive({ params, toggles });
+    return applyValuesToLive({ params, toggles });
+}
+
+// When a field is switched off, the override for it stays live with nothing
+// managing it. Put the master's value back for those overrides only; the user's
+// other edits are left alone.
+function releaseDisabledOverrides(previous, next) {
+    const isAutobound = getMode(getSettings()) === MODES.AUTOBOUND;
+    const sub = isAutobound ? (chat_metadata?.prepreset ?? null) : getActiveSub();
+    if (!sub) {
+        return;
+    }
+    applyMasterValuesFor(releasedOverrides(previous, next, sub));
+}
+
+// Leaving Manual: hand the sub-preset's overrides back and clear the selection,
+// so coming back starts from Master instead of showing a sub-preset whose values
+// aren't live. Only the fields Manual manages were ever applied.
+function releaseActiveSubPreset() {
+    const sub = getActiveSub();
+    if (!sub) {
+        return;
+    }
+    const manualFields = getEnabledFields(getSettings(), MODES.MANUAL);
+    const enabled = new Set(manualFields.params);
+    applyMasterValuesFor({
+        paramKeys: Object.keys(sub.params).filter(key => enabled.has(key)),
+        toggleIds: manualFields.toggles ? Object.keys(sub.toggles) : [],
+    });
+    setActiveSubPreset(getSettings(), getMasterName(), null);
+    persist();
 }
 
 // Every PromptManager mutation goes through saveServiceSettings, so wrapping it
@@ -558,9 +598,7 @@ function installChangeHook() {
     const original = promptManager.saveServiceSettings.bind(promptManager);
     promptManager.saveServiceSettings = function () {
         notifySelectionChanged();
-        if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
-            handleLiveValuesEdited();
-        }
+        handleLiveValuesEdited();
         return original();
     };
     changeHookInstalled = true;
@@ -581,9 +619,7 @@ function scheduleRender() {
     requestAnimationFrame(() => {
         renderScheduled = false;
         notifySelectionChanged();
-        if (getMode(getSettings()) === MODES.AUTOBOUND && !getIsApplying()) {
-            handleLiveValuesEdited();
-        }
+        handleLiveValuesEdited();
     });
 }
 

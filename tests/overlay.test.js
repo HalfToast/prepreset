@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     valuesEqual, effectiveParams, diffParams, mergeParams,
-    effectiveToggles, diffToggles, mergeToggles, paramsDirty, togglesDirty, releasedOverrides,
+    effectiveToggles, diffToggles, mergeToggles, paramsDirty, togglesDirty, effectiveValues, releasedOverrides,
 } from '../src/overlay.js';
 
 test('valuesEqual compares primitives strictly', () => {
@@ -278,4 +278,20 @@ test('releasedOverrides releases no toggles when prompt toggles were already off
 
 test('releasedOverrides tolerates missing inputs', () => {
     assert.deepEqual(releasedOverrides(null, undefined, null), { paramKeys: [], toggleIds: [] });
+});
+
+test('effectiveValues overlays overrides onto master values', () => {
+    const master = { params: { temperature: 1.0, top_p: 0.9 }, toggles: { prompt1: true, prompt2: false } };
+    const overrides = { params: { temperature: 0.7 }, toggles: { prompt2: true } };
+    assert.deepEqual(effectiveValues(master, overrides, ['temperature', 'top_p']), {
+        params: { temperature: 0.7, top_p: 0.9 },
+        toggles: { prompt1: true, prompt2: true },
+    });
+});
+
+test('effectiveValues handles missing overrides and disabled toggles', () => {
+    const master = { params: { temperature: 1.0 }, toggles: { p: true } };
+    assert.deepEqual(effectiveValues(master, null, ['temperature']), { params: { temperature: 1.0 }, toggles: { p: true } });
+    assert.deepEqual(effectiveValues(master, {}, ['temperature']), { params: { temperature: 1.0 }, toggles: { p: true } });
+    assert.deepEqual(effectiveValues({ params: {}, toggles: null }, { toggles: { p: false } }, []), { params: {}, toggles: null });
 });

@@ -1,12 +1,13 @@
 /**
- * The Prepreset drawer in the Extensions panel, for picking which fields
- * sub-presets manage. Uses textContent throughout, so nothing needs escaping.
- * SillyTavern handles opening and closing .inline-drawer (public/script.js:12193).
+ * The Prepreset drawer in the Extensions panel: the operating mode, and which
+ * fields that mode manages. Uses textContent throughout, so nothing needs
+ * escaping. SillyTavern opens and closes .inline-drawer (public/script.js:12193).
  */
 
 const PANEL_ID = 'prepreset_settings';
 
-// { getCatalogue, getEnabledFields, setEnabledFields, onChanged }
+// { getCatalogue, getMode, setMode, onModeChanged, getEnabledFields,
+//   setEnabledFields, onChanged }
 let api = null;
 
 // Safe to call repeatedly.
@@ -34,7 +35,7 @@ export function injectSettingsPanel(panelApi) {
         </div>
         <div class="inline-drawer-content">
             <div class="prepreset_mode_container"></div>
-            <small class="prepreset_fields_note">Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master's value back.</small>
+            <small class="prepreset_fields_note"></small>
             <div class="prepreset_fields"></div>
         </div>
     `;
@@ -47,74 +48,71 @@ export function injectSettingsPanel(panelApi) {
     renderSettingsPanel();
 }
 
+const MODE_NOTES = {
+    manual: 'Use the sub-preset dropdown under the master preset to pick, save and manage sub-presets.',
+    autobound: 'Each chat remembers its own master preset, prompt toggles and parameter overrides.',
+};
+
+const FIELD_NOTES = {
+    manual: 'Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master\'s value back.',
+    autobound: 'Chats can only store checked fields. Unchecked fields follow the master preset. Unchecking a field a chat changed puts the master\'s value back.',
+};
+
+function radioRow(value, label, checked) {
+    const row = document.createElement('label');
+    row.classList.add('radio_label');
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'prepreset_mode';
+    input.value = value;
+    input.checked = checked;
+    const text = document.createElement('span');
+    text.textContent = label;
+    row.append(input, text);
+    return row;
+}
+
+function onModeChanged(event) {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || input.name !== 'prepreset_mode') {
+        return;
+    }
+    api.setMode(input.value);
+    api.onModeChanged(input.value);
+    renderSettingsPanel();
+}
+
 function renderModeSection() {
     const container = document.querySelector(`#${PANEL_ID} .prepreset_mode_container`);
     if (!container || !api) {
         return;
     }
 
-    const mode = api.getMode ? api.getMode() : 'manual';
-    const group = document.createElement('div');
-    group.classList.add('prepreset_mode_group');
+    const mode = api.getMode();
 
     const title = document.createElement('b');
-    title.textContent = 'Operating Mode';
+    title.textContent = 'Operating mode';
 
     const radioGroup = document.createElement('div');
     radioGroup.classList.add('radio_group');
-
-    const manualLabel = document.createElement('label');
-    manualLabel.classList.add('radio_label');
-    const manualRadio = document.createElement('input');
-    manualRadio.type = 'radio';
-    manualRadio.name = 'prepreset_mode';
-    manualRadio.value = 'manual';
-    manualRadio.checked = mode === 'manual';
-    const manualText = document.createElement('span');
-    manualText.textContent = 'Manual (Sub-presets)';
-    manualLabel.append(manualRadio, manualText);
-
-    const autoboundLabel = document.createElement('label');
-    autoboundLabel.classList.add('radio_label');
-    const autoboundRadio = document.createElement('input');
-    autoboundRadio.type = 'radio';
-    autoboundRadio.name = 'prepreset_mode';
-    autoboundRadio.value = 'autobound';
-    autoboundRadio.checked = mode === 'autobound';
-    const autoboundText = document.createElement('span');
-    autoboundText.textContent = 'Auto-bound (Per-chat)';
-    autoboundLabel.append(autoboundRadio, autoboundText);
-
-    radioGroup.append(manualLabel, autoboundLabel);
+    radioGroup.append(
+        radioRow('manual', 'Manual (sub-presets)', mode === 'manual'),
+        radioRow('autobound', 'Auto-bound (per-chat)', mode === 'autobound'),
+    );
+    radioGroup.addEventListener('change', onModeChanged);
 
     const note = document.createElement('small');
     note.classList.add('prepreset_mode_note');
-    note.textContent = mode === 'autobound'
-        ? 'Auto-bound: Each chat automatically remembers its Master preset, prompt toggles, and parameter overrides.'
-        : 'Manual: Use the sub-preset dropdown under the master preset to pick, save, and manage sub-presets.';
+    note.textContent = MODE_NOTES[mode];
 
-    radioGroup.addEventListener('change', (event) => {
-        const target = event.target;
-        if (target instanceof HTMLInputElement && target.name === 'prepreset_mode') {
-            const newMode = target.value;
-            if (api.setMode) {
-                api.setMode(newMode);
-            }
-            if (api.onModeChanged) {
-                api.onModeChanged(newMode);
-            }
-            renderSettingsPanel();
-        }
-    });
-
+    const group = document.createElement('div');
+    group.classList.add('prepreset_mode_group');
     group.append(title, radioGroup, note);
     container.replaceChildren(group);
 
     const fieldsNote = document.querySelector(`#${PANEL_ID} .prepreset_fields_note`);
     if (fieldsNote) {
-        fieldsNote.textContent = mode === 'autobound'
-            ? 'Auto-bound fields: Chats can only store checked fields. Unchecked fields follow the master preset. Unchecking a field that a chat changed puts the master\'s value back.'
-            : 'Manual sub-preset fields: Sub-presets can only store checked fields. Unchecked fields are left alone when you switch sub-presets. Unchecking a field the active sub-preset changed puts the master\'s value back.';
+        fieldsNote.textContent = FIELD_NOTES[mode];
     }
 }
 

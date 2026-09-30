@@ -20,20 +20,16 @@ master still reach your sub-presets. Pick one, change what you want, and press
 Save.
 
 * Sub-presets belong to the master preset they were created under.
-* Two operating modes: Manual (Sub-presets) and Auto-bound (Per-chat).
-* In Manual mode, switching is manual and saving is explicit. Changing values
-  never touches a stored sub-preset until you press Save.
-* In Auto-bound mode, presets and toggles automatically follow each chat.
-  The sub-preset dropdown is hidden, and overrides are saved directly into the
-  active chat.
+* There are two modes: Manual, where you pick and save sub-presets yourself,
+  and Auto-bound, where each chat keeps its own. See below.
 * Prepreset never writes to your preset files. Sub-presets live in
-  `settings.json` under `extension_settings.prepreset`, while chat-bound overrides
-  live inside each chat's metadata.
-* Connection settings (source, model, URLs, proxy, credentials) are never part
-  of a sub-preset or chat override. Prompt text and order always come from the
-  master too; only on/off state is stored.
-* Saving the master while a sub-preset or chat override is active asks whether
-  to save the master's own values or what's on screen.
+  `settings.json` under `extension_settings.prepreset`; chat overrides live in
+  the chat's own metadata.
+* Connection settings (source, model, URLs, proxy, credentials) are never
+  stored. Prompt text and order always come from the master too; only on/off
+  state is stored.
+* Saving the master while overrides are active asks whether to save the
+  master's own values or what's on screen.
 
 ## Install
 
@@ -82,29 +78,34 @@ first.
 
 ## Operating modes
 
-In the Prepreset drawer in the Extensions panel, choose your operating mode:
+The Prepreset drawer in the Extensions panel picks the mode.
 
-* **Manual (Sub-presets)** *(default)*: Sub-preset dropdown row under the master
-  preset dropdown. Manage named variations with Save, New, Duplicate, and Delete.
-* **Auto-bound (Per-chat)**: Fully automated. The sub-preset dropdown is removed.
-  Each chat remembers its own master preset and any prompt toggle or parameter
-  overrides you make while in that chat. Switching chats automatically selects the
-  chat's master preset and applies its overrides. An in-chat toast notification
-  (auto-dismissing after a few seconds) displays the active preset and override count.
+**Manual (sub-presets)** is the default, and everything above describes it: a
+dropdown row under the master preset, with Save, New, Duplicate and Delete.
+
+**Auto-bound (per-chat)** hides that row and works on its own instead. Each
+chat remembers its master preset and whatever toggles or parameters you change
+while you're in it, and opening a chat selects its master and applies its
+overrides. A toast tells you which preset was applied and how many overrides it
+has.
+
+A chat's overrides are only live while that chat is open. Leaving it, or
+switching back to Manual, puts the master's values back so they can't end up in
+your preset file. Going from Manual to Auto-bound does the same for the active
+sub-preset and clears the selection.
 
 ## Settings
 
-The Prepreset drawer in the Extensions panel picks which fields are managed.
-Toggles and parameters are configured separately for **Manual** and **Auto-bound**
-modes; selecting an operating mode displays and edits that mode's managed fields.
-By default it's only prompt toggles, so nothing else changes until you turn
-parameters on. Fields are grouped (Sampling, Context & length, Reasoning & tools,
-Prompt formatting, Media, Other) with All/None buttons for each group.
+The same drawer picks which fields are managed. Each mode has its own list, so
+selecting a mode shows and edits that mode's fields. By default it's only prompt
+toggles, so nothing else changes until you turn parameters on. Fields are
+grouped (Sampling, Context & length, Reasoning & tools, Prompt formatting,
+Media, Other) with All/None buttons per group.
 
-Unchecked fields are left alone when you switch sub-presets or chats. If you
-uncheck a field that had active overrides, the master's value is put back so it
-can't leak into the master preset file. Stored values aren't deleted; check the
-field again to manage it again.
+Unchecked fields are left alone when you switch sub-presets or chats. Uncheck a
+field that has an override live and the master's value goes back, so it can't
+leak into the preset file. Nothing stored is deleted; check the field again to
+manage it once more.
 
 ## Known limitations
 
@@ -112,6 +113,13 @@ field again to manage it again.
   Nothing is deleted, and renaming it back brings them back. The master file
   itself is safe, since Prepreset restores the master's values before the
   rename saves, unless toggles are managed and the master has no prompt order.
+* **Only the open chat follows a master rename.** Other chats still point at
+  the old name, which Prepreset can't fix without opening them.
+* **A chat bound to a missing master is left alone.** Opening it warns and
+  applies nothing rather than rebinding it, so it all comes back if a preset
+  with that name does.
+* **Picking a different master inside a chat rebinds that chat** to it, with no
+  overrides to start from.
 * **Prompts added to the master later** follow the master's state, since
   sub-presets only store toggles they changed.
 * **Sub-presets from before parameter support store every toggle**, so master
