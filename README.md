@@ -28,8 +28,9 @@ Save.
 * Connection settings (source, model, URLs, proxy, credentials) are never
   stored. Prompt text and order always come from the master too; only on/off
   state is stored.
-* Saving the master while overrides are active asks whether to save the
-  master's own values or what's on screen.
+* In Manual, saving the master while a sub-preset is active asks whether to
+  save the master's own values or what's on screen. In Auto-bound it saves
+  what's on screen; see below.
 
 ## Install
 
@@ -94,6 +95,11 @@ switching back to Manual, puts the master's values back so they can't end up in
 your preset file. Going from Manual to Auto-bound does the same for the active
 sub-preset and clears the selection.
 
+Saving the master from inside a chat writes what's on screen into it, without
+asking, and the chat's overrides are cleared because they now match. Since
+chats only store what differs from their master, every other chat on that
+master picks up the new values for anything it hasn't changed itself.
+
 ## Settings
 
 The same drawer picks which fields are managed. Each mode has its own list, so
@@ -118,6 +124,9 @@ manage it once more.
 * **A chat bound to a missing master is left alone.** Opening it warns and
   applies nothing rather than rebinding it, so it all comes back if a preset
   with that name does.
+* **A preset named after a character** is selected by SillyTavern when that
+  character's chat opens. A chat that's already bound keeps its own master; a
+  chat opened for the first time binds to the one SillyTavern picked.
 * **Picking a different master inside a chat rebinds that chat** to it, with no
   overrides to start from.
 * **Prompts added to the master later** follow the master's state, since

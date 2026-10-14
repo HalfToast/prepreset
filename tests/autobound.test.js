@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    countOverrides, formatIndicatorText,
+    formatIndicatorText,
     initAutobound, handleChatChanged, handleLiveValuesEdited,
     setIsApplying, releaseChatOverrides,
-    handleMasterRenameBefore, handleMasterRenamed,
+    handleMasterRenameBefore, handleMasterRenamed, handleMasterSaved,
 } from '../src/autobound.js';
 
 function pick(source, keys) {
@@ -38,12 +38,18 @@ function fakeTavern({
         masters: masters ?? {
             Default: { params: { temperature: 1, top_p: 0.9, top_k: 0 }, toggles: { main: true, nsfw: false, jb: true } },
         },
+        enabledKeys,
         live: null,
         saves: 0,
+        immediateSaves: 0,
         toasts: [],
         reads: [],
+        timers: [],
+        // Runs inside waitUntil before the condition is checked, standing in for
+        // whatever SillyTavern finishes while we wait.
+        beforeWait: null,
     };
-    const master = () => state.masters[state.loaded];
+    const master = () => state.masters[state.loaded] ?? {};
     state.live = { params: { ...master().params }, toggles: { ...master().toggles } };
 
     initAutobound({
@@ -59,14 +65,19 @@ function fakeTavern({
             state.live = { params: { ...master().params }, toggles: { ...master().toggles } };
             return true;
         }),
-        enabledParamKeys: () => enabledKeys,
+        enabledParamKeys: () => state.enabledKeys,
+        // Like the real one: null when toggles are managed but the master has no
+        // prompt order to read them from.
         readMasterValues: (options) => {
             state.reads.push(['master', options]);
-            return { params: pick(master().params, enabledKeys), toggles: togglesOn ? { ...master().toggles } : null };
+            if (togglesOn && !master().toggles) {
+                return null;
+            }
+            return { params: pick(master().params ?? {}, state.enabledKeys), toggles: togglesOn ? { ...master().toggles } : null };
         },
         readLiveValues: (options) => {
             state.reads.push(['live', options]);
-            return { params: pick(state.live.params, enabledKeys), toggles: togglesOn ? { ...state.live.toggles } : null };
+            return { params: pick(state.live.params, state.enabledKeys), toggles: togglesOn ? { ...state.live.toggles } : null };
         },
         // Like applyToggles, only prompts already on screen are touched.
         applyValuesToLive: (values) => {
@@ -90,20 +101,28 @@ function fakeTavern({
         saveMetadataDebounced: () => {
             state.saves++;
         },
+        saveMetadata: () => {
+            state.immediateSaves++;
+        },
         toastInfo: (text) => state.toasts.push(['info', text]),
         toastWarning: (text) => state.toasts.push(['warning', text]),
         nextTask: () => Promise.resolve(),
         waitForPresetApplication: () => Promise.resolve(),
+        waitUntil: async (condition) => {
+            await state.beforeWait?.();
+            return !!condition();
+        },
+        setTimer: (run) => {
+            state.timers.push(run);
+            return state.timers.length;
+        },
+        clearTimer: (handle) => {
+            state.timers[handle - 1] = null;
+        },
+        isMasterReady: () => !!state.masters[state.loaded]?.params,
     });
     return state;
 }
-
-test('countOverrides counts both toggles and params', () => {
-    assert.equal(countOverrides(null), 0);
-    assert.equal(countOverrides({}), 0);
-    assert.equal(countOverrides({ toggles: { a: true, b: false }, params: { temp: 0.7 } }), 3);
-    assert.equal(countOverrides({ toggles: { a: true }, params: {} }), 1);
-});
 
 test('formatIndicatorText handles zero and non-zero overrides', () => {
     assert.equal(formatIndicatorText('Default', 0), 'Applied preset: Default');
@@ -380,4 +399,238 @@ test('a second chat change supersedes a first one still switching master', async
 
     assert.equal(tavern.live.params.temperature, 1);
     assert.deepEqual(chatB.prepreset, { master: 'Default', params: { top_p: 0.4 }, toggles: {} });
+});
+
+// Saving the master from inside a chat, in Auto-bound.
+
+test('saving the master inside a chat folds its overrides once the save lands', async () => {
+    const tavern = fakeTavern({
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5 }, toggles: { nsfw: true } } },
+    });
+    await handleChatChanged();
+    // SillyTavern's save writes what's on screen into the master.
+    tavern.beforeWait = () => {
+        tavern.masters.Default.params.temperature = 0.5;
+        tavern.masters.Default.toggles.nsfw = true;
+    };
+
+    await handleMasterSaved();
+
+    assert.deepEqual(tavern.chatMetadata.prepreset, { master: 'Default', params: {}, toggles: {} });
+    assert.equal(tavern.immediateSaves, 1);
+    assert.equal(tavern.live.params.temperature, 0.5);
+});
+
+test('folding keeps overrides for fields that are not enabled', async () => {
+    const tavern = fakeTavern({
+        enabledKeys: ['temperature'],
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5, top_k: 40 }, toggles: {} } },
+    });
+    await handleChatChanged();
+    tavern.beforeWait = () => {
+        tavern.masters.Default.params.temperature = 0.5;
+    };
+
+    await handleMasterSaved();
+
+    assert.deepEqual(tavern.chatMetadata.prepreset.params, { top_k: 40 });
+});
+
+test('a master save that never lands leaves the chat overrides alone', async () => {
+    const tavern = fakeTavern({
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5 }, toggles: {} } },
+    });
+    await handleChatChanged();
+
+    await handleMasterSaved();
+
+    assert.deepEqual(tavern.chatMetadata.prepreset.params, { temperature: 0.5 });
+    assert.equal(tavern.immediateSaves, 0);
+});
+
+test('the save SillyTavern makes during a rename does not fold anything', async () => {
+    const tavern = fakeTavern({
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5 }, toggles: {} } },
+    });
+    await handleChatChanged();
+    handleMasterRenameBefore('Default', 'Renamed');
+
+    await handleMasterSaved();
+
+    assert.deepEqual(tavern.chatMetadata.prepreset.params, { temperature: 0.5 });
+});
+
+test('a rename waits for SillyTavern to fill the renamed master before re-applying', async () => {
+    const tavern = fakeTavern({
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5 }, toggles: { nsfw: true } } },
+    });
+    await handleChatChanged();
+    handleMasterRenameBefore('Default', 'Renamed');
+    // renamePreset saves an empty preset for Chat Completion; the real contents
+    // only arrive with the follow-up Update preset save.
+    const original = tavern.masters.Default;
+    tavern.masters.Renamed = {};
+    delete tavern.masters.Default;
+    tavern.loaded = 'Renamed';
+    tavern.beforeWait = () => {
+        tavern.masters.Renamed = original;
+    };
+
+    await handleMasterRenamed('Default', 'Renamed');
+
+    assert.equal(tavern.live.params.temperature, 0.5);
+    assert.equal(tavern.live.toggles.nsfw, true);
+    assert.deepEqual(tavern.chatMetadata.prepreset, { master: 'Renamed', params: { temperature: 0.5 }, toggles: { nsfw: true } });
+});
+
+test('a renamed master that never fills keeps the chat settings', async () => {
+    const tavern = fakeTavern({
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5 }, toggles: {} } },
+    });
+    await handleChatChanged();
+    handleMasterRenameBefore('Default', 'Renamed');
+    tavern.masters.Renamed = {};
+    delete tavern.masters.Default;
+    tavern.loaded = 'Renamed';
+
+    await handleMasterRenamed('Default', 'Renamed');
+
+    assert.ok(tavern.toasts.some(([kind]) => kind === 'warning'));
+    tavern.masters.Renamed = { params: { temperature: 1, top_p: 0.9 }, toggles: { main: true, nsfw: false, jb: true } };
+    handleLiveValuesEdited();
+    assert.deepEqual(tavern.chatMetadata.prepreset.params, { temperature: 0.5 });
+});
+
+test('a rename that fails part-way recovers when its watchdog fires', async () => {
+    const tavern = fakeTavern({
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5 }, toggles: {} } },
+    });
+    await handleChatChanged();
+    handleMasterRenameBefore('Default', 'Renamed');
+    assert.equal(tavern.live.params.temperature, 1);
+
+    // PRESET_RENAMED never comes; the watchdog does.
+    await tavern.timers.at(-1)();
+
+    assert.equal(tavern.live.params.temperature, 0.5);
+    tavern.live.params.top_p = 0.4;
+    handleLiveValuesEdited();
+    assert.deepEqual(tavern.chatMetadata.prepreset.params, { temperature: 0.5, top_p: 0.4 });
+});
+
+test('overrides left on screen after a reload go back to the master', async () => {
+    const tavern = fakeTavern({ chatId: null });
+    // SillyTavern restored the last chat's values from settings.json, but nothing
+    // in memory says they're overrides.
+    tavern.live.params.temperature = 1.5;
+
+    await handleChatChanged();
+
+    assert.equal(tavern.live.params.temperature, 1);
+});
+
+test('a preset SillyTavern picks for a new chat is not recorded as an edit', async () => {
+    const tavern = fakeTavern({
+        masters: {
+            Default: { params: { temperature: 1, top_p: 0.9 }, toggles: { main: true } },
+            Alice: { params: { temperature: 0.3, top_p: 0.5 }, toggles: { main: false } },
+        },
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.8 }, toggles: {} } },
+    });
+    await handleChatChanged();
+
+    // SillyTavern opens Alice's chat and, before our handler runs, auto-selects
+    // the preset named after her.
+    const aliceChat = { prepreset: { master: 'Default', params: { top_p: 0.7 }, toggles: {} } };
+    tavern.chatId = 'alice-chat';
+    tavern.chatMetadata = aliceChat;
+    tavern.loaded = 'Alice';
+    tavern.live = { params: { ...tavern.masters.Alice.params }, toggles: { ...tavern.masters.Alice.toggles } };
+    handleLiveValuesEdited();
+    assert.deepEqual(aliceChat.prepreset, { master: 'Default', params: { top_p: 0.7 }, toggles: {} });
+
+    await handleChatChanged();
+
+    assert.equal(tavern.loaded, 'Default');
+    assert.equal(tavern.live.params.top_p, 0.7);
+});
+
+test('re-ticking a field brings back its stored override instead of deleting it', async () => {
+    const tavern = fakeTavern({
+        enabledKeys: ['temperature'],
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 1.5 }, toggles: {} } },
+    });
+    await handleChatChanged();
+
+    tavern.enabledKeys = [];
+    tavern.live.params.temperature = 1;
+    await handleChatChanged({ silent: true });
+    tavern.enabledKeys = ['temperature'];
+    await handleChatChanged({ silent: true });
+
+    assert.equal(tavern.live.params.temperature, 1.5);
+    assert.deepEqual(tavern.chatMetadata.prepreset.params, { temperature: 1.5 });
+    assert.equal(tavern.toasts.length, 1);
+});
+
+test('discrete edits save the chat at once; slider drags stay debounced', async () => {
+    const tavern = fakeTavern({ chatMetadata: { prepreset: { master: 'Default', params: {}, toggles: {} } } });
+    await handleChatChanged();
+
+    tavern.live.toggles.nsfw = true;
+    handleLiveValuesEdited({ immediate: true });
+    assert.equal(tavern.immediateSaves, 1);
+
+    tavern.live.params.temperature = 0.7;
+    handleLiveValuesEdited();
+    assert.equal(tavern.immediateSaves, 1);
+    assert.equal(tavern.saves, 1);
+});
+
+test('switching to Manual while the chat master is loading applies nothing', async () => {
+    let finishSwitch;
+    const tavern = fakeTavern({
+        masters: {
+            Default: { params: { temperature: 1, top_p: 0.9 }, toggles: { main: true } },
+            Story: { params: { temperature: 1, top_p: 0.9 }, toggles: { main: true } },
+        },
+        chatMetadata: { prepreset: { master: 'Story', params: { temperature: 0.2 }, toggles: {} } },
+        selectMasterPreset: (name) => new Promise((resolve) => {
+            finishSwitch = () => {
+                tavern.loaded = name;
+                resolve(true);
+            };
+        }),
+    });
+
+    const change = handleChatChanged();
+    await new Promise(resolve => setImmediate(resolve));
+    tavern.mode = 'manual';
+    releaseChatOverrides();
+    finishSwitch();
+    await change;
+
+    assert.equal(tavern.live.params.temperature, 1);
+});
+
+test('no toast claims a preset was applied when nothing could be', async () => {
+    const tavern = fakeTavern({
+        masters: { Default: { params: { temperature: 1 } } },
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5 }, toggles: {} } },
+    });
+
+    await handleChatChanged();
+
+    assert.ok(!tavern.toasts.some(([kind]) => kind === 'info'));
+});
+
+test('the toast counts only the overrides that were applied', async () => {
+    const tavern = fakeTavern({
+        enabledKeys: ['temperature'],
+        chatMetadata: { prepreset: { master: 'Default', params: { temperature: 0.5, top_k: 40 }, toggles: {} } },
+    });
+
+    await handleChatChanged();
+
+    assert.deepEqual(tavern.toasts, [['info', 'Applied preset: Default (1 override)']]);
 });

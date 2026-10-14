@@ -155,7 +155,11 @@ export function migrate(settings) {
             ? master.activeSubId
             : null;
 
-        masters[name] = { activeSubId, subPresets };
+        // An entry with no sub-presets carries nothing; older versions left one
+        // behind for every preset ever selected.
+        if (subPresets.length > 0) {
+            masters[name] = { activeSubId, subPresets };
+        }
     }
 
     return {
@@ -206,24 +210,34 @@ export function getMaster(settings, masterName) {
     return settings.masters[masterName];
 }
 
+// Reads go through this so they never create an entry; only writes do.
+function peekMaster(settings, masterName) {
+    const master = settings.masters?.[masterName];
+    return isPlainObject(master) ? master : null;
+}
+
 export function listSubPresets(settings, masterName) {
-    return getMaster(settings, masterName).subPresets;
+    return peekMaster(settings, masterName)?.subPresets ?? [];
 }
 
 export function findSubPreset(settings, masterName, subId) {
-    return getMaster(settings, masterName).subPresets.find(sub => sub.id === subId) ?? null;
+    return listSubPresets(settings, masterName).find(sub => sub.id === subId) ?? null;
 }
 
 // Null when the master itself is selected.
 export function getActiveSubPreset(settings, masterName) {
-    const master = getMaster(settings, masterName);
-    return master.activeSubId ? findSubPreset(settings, masterName, master.activeSubId) : null;
+    const activeSubId = peekMaster(settings, masterName)?.activeSubId;
+    return activeSubId ? findSubPreset(settings, masterName, activeSubId) : null;
 }
 
 // Pass null to select the master. An id that doesn't resolve does the same
 // thing rather than being stored. Returns the id actually stored.
 export function setActiveSubPreset(settings, masterName, subId) {
-    const master = getMaster(settings, masterName);
+    const master = peekMaster(settings, masterName);
+    if (!master) {
+        // Nothing to select without sub-presets, so nothing to store either.
+        return null;
+    }
     master.activeSubId = master.subPresets.some(sub => sub.id === subId) ? subId : null;
     return master.activeSubId;
 }

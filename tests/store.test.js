@@ -160,7 +160,9 @@ test('migrate clears an activeSubId that points at nothing', () => {
 });
 
 test('migrate drops a master whose value is not an object', () => {
-    const result = migrate({ masters: { Bad: 'nope', Good: { activeSubId: null, subPresets: [] } } });
+    const result = migrate({
+        masters: { Bad: 'nope', Good: { activeSubId: null, subPresets: [{ id: 'a', name: 'A', toggles: {} }] } },
+    });
     assert.deepEqual(Object.keys(result.masters), ['Good']);
 });
 
@@ -392,4 +394,26 @@ test('createSubPreset still assigns distinct ids without crypto.randomUUID', () 
         assert.deepEqual(a.toggles, { main: true });
         assert.deepEqual(b.toggles, { main: false });
     });
+});
+
+// Reading used to create the entry, so every preset ever selected left an
+// empty one behind in settings.json.
+test('reading sub-presets does not create a master entry', () => {
+    const settings = createDefaultSettings();
+    assert.deepEqual(listSubPresets(settings, 'Unseen'), []);
+    assert.equal(findSubPreset(settings, 'Unseen', 'x'), null);
+    assert.equal(getActiveSubPreset(settings, 'Unseen'), null);
+    assert.equal(setActiveSubPreset(settings, 'Unseen', null), null);
+    assert.equal(Object.hasOwn(settings.masters, 'Unseen'), false);
+});
+
+test('migrate drops master entries with no sub-presets', () => {
+    const result = migrate({
+        version: 2,
+        masters: {
+            Empty: { activeSubId: null, subPresets: [] },
+            Kept: { activeSubId: null, subPresets: [{ id: 'a', name: 'A', params: {}, toggles: {} }] },
+        },
+    });
+    assert.deepEqual(Object.keys(result.masters), ['Kept']);
 });

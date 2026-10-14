@@ -7,7 +7,9 @@
  * src/toggles.js, which are unit-tested under plain Node.
  */
 
-import { saveSettingsDebounced, eventSource, event_types, chat_metadata, getCurrentChatId } from '/script.js';
+import {
+    saveSettingsDebounced, eventSource, event_types, chat_metadata, getCurrentChatId, saveMetadata,
+} from '/script.js';
 import { extension_settings, saveMetadataDebounced } from '/scripts/extensions.js';
 import {
     oai_settings, promptManager, settingsToUpdate, openai_setting_names, getPresetApplicationPromise,
@@ -28,7 +30,7 @@ import { installMasterSaveGuard } from './src/guard.js';
 import { injectSettingsPanel } from './src/settings-panel.js';
 import {
     initAutobound, handleChatChanged, handleLiveValuesEdited, releaseChatOverrides,
-    handleMasterRenameBefore, handleMasterRenamed,
+    handleMasterRenameBefore, handleMasterRenamed, handleMasterSaved,
 } from './src/autobound.js';
 
 export const EXTENSION_KEY = 'prepreset';
@@ -80,10 +82,15 @@ export async function init() {
         getCurrentChatId,
         getChatMetadata: () => chat_metadata,
         saveMetadataDebounced,
+        saveMetadata,
         toastInfo: (text, title) => toastr.info(text, title, { timeOut: 3000, extendedTimeOut: 1000 }),
         toastWarning: (text, title) => toastr.warning(text, title),
         nextTask: () => new Promise(resolve => setTimeout(resolve, 0)),
         waitForPresetApplication: () => getPresetApplicationPromise(),
+        waitUntil,
+        setTimer: (run, ms) => setTimeout(run, ms),
+        clearTimer: (handle) => clearTimeout(handle),
+        isMasterReady,
     });
 
     installChangeHook();
@@ -102,7 +109,9 @@ export async function init() {
 
     installMasterSaveGuard({
         getMode: () => getMode(getSettings()),
-        hasActiveChat: () => Boolean(getCurrentChatId()),
+        onAutoboundMasterSave: () => {
+            handleMasterSaved().catch(error => console.error(`[${EXTENSION_NAME}] folding chat overrides after save failed`, error));
+        },
         getActiveSub,
         isDirty,
         readLiveValues,
@@ -139,14 +148,25 @@ export async function init() {
             releaseDisabledOverrides(previous, next);
             return next;
         },
+        // In Auto-bound, re-apply the open chat rather than recording: a field
+        // ticked back on gets its stored override back, where recording the
+        // master's value now on screen would delete it.
         onChanged: () => {
             persist();
             notifySelectionChanged();
-            handleLiveValuesEdited();
+            if (getMode(getSettings()) === MODES.AUTOBOUND) {
+                handleChatChanged({ silent: true });
+            }
         },
     });
 
-    onSelectionChanged(renderControlRow);
+    // The row only exists in Manual; in Auto-bound it's hidden, and rebuilding it
+    // (with a full isDirty read) every slider frame would be wasted.
+    onSelectionChanged(() => {
+        if (getMode(getSettings()) === MODES.MANUAL) {
+            renderControlRow();
+        }
+    });
 
     setRowVisible(getMode(getSettings()) === MODES.MANUAL);
     if (getMode(getSettings()) === MODES.AUTOBOUND) {
@@ -170,13 +190,16 @@ export async function init() {
         setActiveSubPreset(getSettings(), getMasterName(), null);
         persist();
         notifySelectionChanged();
-        handleLiveValuesEdited();
+        // Picking another master inside a chat rebinds that chat.
+        handleLiveValuesEdited({ immediate: true });
     });
 
-    // preset-manager.js awaits this before renamePreset() runs, and renamePreset
-    // saves the renamed preset from live oai_settings as its first act, before any
-    // click the guard could intercept. With a sub-preset active that save would
-    // bake its values into the master file under the new name, so put the
+    // preset-manager.js awaits this before renamePreset() runs. For Chat
+    // Completion, renamePreset stores an empty preset (getPresetSettings has no
+    // 'openai' case); the real contents come from the Update preset click
+    // SillyTavern fires straight after (preset-manager.js:1077), which reads the
+    // live values and never reaches the guard. With a sub-preset or a chat's
+    // overrides live, that would bake them into the renamed master, so put the
     // master's own values back first.
     //
     // Nothing re-applies the sub-preset afterwards, on purpose: the rename changes
@@ -453,24 +476,10 @@ export function selectSubPreset(subId) {
     notifySelectionChanged();
 }
 
-// Derived rather than tracked as a flag, so it survives a page reload:
-// SillyTavern persists live settings, and nothing touches the sub-preset until
-// the user saves. Enabled fields only.
+// Manual only: Auto-bound has no unsaved state, since chat edits are recorded
+// as they happen. Derived rather than tracked as a flag, so it survives a page
+// reload, and over enabled fields only.
 export function isDirty() {
-    if (getMode(getSettings()) === MODES.AUTOBOUND) {
-        if (!getCurrentChatId()) {
-            return false;
-        }
-        const live = readLiveValues({ quiet: true });
-        const master = readMasterValues({ quiet: true });
-        if (!live || !master) {
-            return false;
-        }
-        if (paramsDirty(live.params, master.params, enabledParamKeys())) {
-            return true;
-        }
-        return live.toggles !== null && master.toggles !== null && togglesDirty(live.toggles, master.toggles);
-    }
     const sub = getActiveSub();
     if (!sub) {
         return false;
@@ -598,7 +607,10 @@ function installChangeHook() {
     const original = promptManager.saveServiceSettings.bind(promptManager);
     promptManager.saveServiceSettings = function () {
         notifySelectionChanged();
-        handleLiveValuesEdited();
+        // Toggle clicks are discrete, so the chat is saved at once. Prompt text
+        // edits pass through here too but change nothing the chat stores, so
+        // they don't write the chat file.
+        handleLiveValuesEdited({ immediate: true });
         return original();
     };
     changeHookInstalled = true;
@@ -630,7 +642,46 @@ const INDIRECT_PARAM_CONTROLS = [
     'input[name="continue_postfix"]',
 ];
 
+// `input` fires continuously during a slider drag, so it only schedules a
+// render (and a debounced record). `change` fires once the edit is finished, on
+// slider release, select and checkbox, so it records and saves the chat at once.
 function installParamChangeListener() {
     const selectors = [...getCatalogue().map(field => field.selector), ...INDIRECT_PARAM_CONTROLS].join(', ');
     $(document).on('input change', selectors, scheduleRender);
+    $(document).on('change', selectors, () => handleLiveValuesEdited({ immediate: true }));
+}
+
+// Polls until `condition` holds or `timeout` passes. Used where SillyTavern
+// finishes something (a preset save) without emitting an event for it.
+function waitUntil(condition, { timeout = 10000, interval = 100 } = {}) {
+    return new Promise((resolve) => {
+        const started = Date.now();
+        const check = () => {
+            let met = false;
+            try {
+                met = !!condition();
+            } catch {
+                // Live settings can be mid-change; try again.
+            }
+            if (met) {
+                resolve(true);
+            } else if (Date.now() - started >= timeout) {
+                resolve(false);
+            } else {
+                setTimeout(check, interval);
+            }
+        };
+        check();
+    });
+}
+
+// A renamed Chat Completion preset stays empty until the follow-up save fills it
+// in place (openai.js saveOpenAIPreset), so it's ready once it holds any field
+// Prepreset manages.
+function isMasterReady() {
+    const preset = getMasterPreset({ quiet: true });
+    if (!preset) {
+        return false;
+    }
+    return Object.hasOwn(preset, 'prompt_order') || getCatalogue().some(field => Object.hasOwn(preset, field.key));
 }

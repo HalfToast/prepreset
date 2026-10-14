@@ -20,7 +20,7 @@ const BUTTON_SELECTOR = '#update_oai_preset';
 let bypass = false;
 let installed = false;
 
-// api: { getMode, hasActiveChat, getActiveSub, isDirty, readLiveValues, readMasterValues, applyValuesToLive }
+// api: { getMode, onAutoboundMasterSave, getActiveSub, isDirty, readLiveValues, readMasterValues, applyValuesToLive }
 export function installMasterSaveGuard(api) {
     if (installed) {
         return;
@@ -39,15 +39,20 @@ export function installMasterSaveGuard(api) {
             return;
         }
 
-        const isAutobound = api.getMode() === 'autobound';
-        // A sub-preset selection only means anything in Manual mode. One left
-        // over from before the switch isn't live, so it mustn't open the popup.
-        const active = isAutobound ? null : api.getActiveSub();
-        const dirty = api.isDirty();
-
-        if (!active && !(isAutobound && api.hasActiveChat() && dirty)) {
+        // In Auto-bound there's nothing to ask: each chat keeps its own
+        // differences in its metadata, and the open chat's are folded into the
+        // master once the save lands. With no chat open, what's on screen is
+        // already the master's own values.
+        if (api.getMode() === 'autobound') {
+            api.onAutoboundMasterSave();
             return;
         }
+
+        const active = api.getActiveSub();
+        if (!active) {
+            return;
+        }
+        const dirty = api.isDirty();
 
         event.stopImmediatePropagation();
 
@@ -55,19 +60,11 @@ export function installMasterSaveGuard(api) {
         // edits would be lost.
         const liveValues = api.readLiveValues();
 
-        let body;
-        let customButtonLabel;
-
-        if (isAutobound) {
-            body = 'This chat has local preset overrides active, so the live values differ from the master preset.<br><br>Which values should be saved into the master preset?';
-            customButtonLabel = 'Current chat values';
-        } else {
-            const safeName = escapeHtml(active ? active.name : '');
-            body = dirty
-                ? `The sub-preset <b>${safeName}</b> is active and has unsaved changes, so the live values are neither the master preset's nor what <b>${safeName}</b> has stored.<br><br>Which values should be saved into the master preset?`
-                : `The sub-preset <b>${safeName}</b> is active, so the live values are its values, not the master preset's.<br><br>Which values should be saved into the master preset?`;
-            customButtonLabel = dirty ? 'Current values' : `"${active.name}" values`;
-        }
+        const safeName = escapeHtml(active.name);
+        const body = dirty
+            ? `The sub-preset <b>${safeName}</b> is active and has unsaved changes, so the live values are neither the master preset's nor what <b>${safeName}</b> has stored.<br><br>Which values should be saved into the master preset?`
+            : `The sub-preset <b>${safeName}</b> is active, so the live values are its values, not the master preset's.<br><br>Which values should be saved into the master preset?`;
+        const customButtonLabel = dirty ? 'Current values' : `"${active.name}" values`;
 
         const result = await new Popup(
             body,
